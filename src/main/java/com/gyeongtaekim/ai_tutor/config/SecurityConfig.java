@@ -38,18 +38,13 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
+                .cors(cors -> cors.disable())
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        // 로그인, 회원가입은 누구나 접근 가능
-                        .requestMatchers("/api/auth/**").permitAll()
-                        // 나머지는 로그인 필요
-                        .anyRequest().authenticated()
-                )
-                .addFilterBefore(
-                        new JwtAuthenticationFilter(jwtTokenProvider, customUserDetailsService),
-                        UsernamePasswordAuthenticationFilter.class
+                        // 모든 요청 허용 (테스트용)
+                        .anyRequest().permitAll()
                 );
 
         return http.build();
