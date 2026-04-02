@@ -2,239 +2,234 @@
 
 ## 1. Project Purpose
 
-This project is not intended to be a generic chatbot.
-It is intended to be a `RAG-based AI tutor` that reduces hallucinations by grounding answers in trusted learning materials and preserves student context across sessions.
+This project is not meant to be a generic chatbot.
+It is intended to be a `RAG-based AI tutor` that:
 
-The core product goals are:
+- answers from trusted learning materials
+- preserves learner context across sessions
+- turns wrong answers into follow-up review
+
+The core product goals remain:
 
 1. `Reduce hallucinations`
-   - Do not let the model answer from vague general knowledge when reliable internal learning data exists.
-   - Use trusted documents, problem sets, explanations, and concept summaries as the primary evidence source.
+   - The system should prefer trusted internal learning content over vague model prior knowledge.
 
 2. `Preserve conversation continuity`
-   - Unlike ordinary chatbots that lose context between sessions, this tutor should remember the learner's recent conversation, learning progress, weak concepts, and review history.
+   - The tutor should remember recent dialogue, learner progress, weak concepts, and preferences.
 
 3. `Support wrong-answer review`
-   - When a student gets a question wrong, the system should not stop at showing the answer.
-   - It should identify the related concept, explain the mistake, and schedule targeted review.
+   - Wrong answers should be recorded, explained, and scheduled for later review.
 
 In short:
 
-`This project is a personalized AI tutor that uses RAG to answer with grounded evidence, remembers ongoing learning context, and builds an automated review loop for wrong answers.`
+`This project is a personalized AI tutor that combines RAG, learner memory, and a review loop for wrong answers.`
 
 ## 2. Current Implementation Status
 
-The current codebase is only the backend foundation for authentication and user management.
+The project is no longer just an auth skeleton.
+It now has a working backend MVP for the main tutor flow.
 
-Implemented so far:
+Implemented:
 
-- Spring Boot application setup
-- PostgreSQL connection
-- JPA user persistence
-- JWT-based authentication
-- Signup and login APIs
-- Protected user APIs
+- Spring Boot backend
+- PostgreSQL persistence
+- JWT signup/login flow
+- user APIs
+- concept APIs
+- problem creation and submission
+- wrong-answer note creation
+- review queue creation and completion
+- chat sessions and chat messages
+- learner memory persistence
+- PDF upload and text extraction
+- chunk persistence for RAG
+- RAG query API
+- document-based question generation API
+- tutor ask flow with RAG grounding
+- fallback grounded answers when OpenAI is unavailable
+- core integration tests with H2
 
-Not implemented yet:
+Still missing or incomplete:
 
-- RAG document ingestion
-- Vector search
-- LLM integration
-- Chat session persistence
-- Learning memory
-- Problem solving flow
-- Wrong-answer pipeline
-- Review scheduling
-- Analytics or weak-concept tracking
-- Frontend
-- Automated tests
+- persistent vector storage (`pgvector`)
+- document-level retrieval filtering
+- high-quality reranking / hybrid retrieval
+- richer tutor answer contract
+- robust grading beyond string equality
+- analytics dashboards
+- full validation and exception handling coverage
+- broader automated test coverage
 
-This means the project is currently in the `backend skeleton` stage, not the full AI tutor stage.
+This means the project is currently in an `MVP backend` stage rather than a pure skeleton stage.
 
 ## 3. Product Definition
 
-The final product should behave like this:
+The target product behavior is:
 
 1. A student asks a question or solves a problem.
-2. The system searches trusted academic content and problem explanations through RAG.
-3. The AI answers only from retrieved evidence whenever possible.
-4. The conversation is saved so the next interaction continues from previous context.
-5. If the student gets a problem wrong, the system records the failure, identifies the weak concept, explains the mistake, and schedules follow-up review.
+2. The system retrieves relevant evidence from trusted learning materials.
+3. The tutor answers from that evidence whenever possible.
+4. The system remembers the interaction in chat and learner memory.
+5. If the student gets something wrong, the system records it and adds review follow-up.
 
-The product is successful only if all three layers work together:
+The product only makes sense when these three layers work together:
 
 - `Grounded answering`
 - `Persistent learning context`
 - `Review-driven tutoring`
 
-## 4. High-Level Architecture
+## 4. Current Architecture
 
-Recommended architecture:
+Current practical architecture:
 
-`Client -> Spring Boot API -> Domain Services -> RAG Retrieval -> LLM -> Persistence -> Review Pipeline`
+`Client -> Spring Boot API -> Domain Services -> RAG Retrieval -> Optional LLM -> PostgreSQL/Files -> Review Pipeline`
 
-Main modules:
+Main modules currently present:
 
 - `Auth/User`
   - signup, login, JWT, user identity
 
 - `Content`
-  - concepts, documents, problems, explanations, metadata
+  - concepts, problems, uploaded documents, chunks
 
 - `RAG`
-  - chunking, embeddings, vector retrieval, evidence selection
+  - PDF ingestion, chunking, keyword/embedding retrieval, question generation
 
 - `Chat`
-  - chat sessions, chat messages, recent conversation context
+  - chat sessions, chat messages, recent conversation persistence
 
 - `Learning Memory`
-  - long-term learner profile, weak concepts, tutoring preferences
+  - weak concepts, learning history summary, tutoring preferences
 
 - `Tutoring`
-  - question answering, explanation, hints, step-by-step support
+  - grounded tutor answer flow, fallback answer generation
 
 - `Review Pipeline`
-  - wrong-answer tracking, concept diagnosis, spaced review queue
+  - wrong-answer tracking, review queue scheduling
 
-- `Analytics`
-  - accuracy trends, weak areas, review completion, progress summaries
+- `Legacy Session Scaffolding`
+  - older Redis-based learning session code still exists but is not the primary direction
 
 ## 5. Why RAG Is Mandatory
 
-The purpose of this project is to reduce hallucinations compared to ordinary generative AI chatbots.
-That means the model must not be treated as the primary source of truth.
+The product goal is to reduce hallucinations.
+That requires retrieval to be structurally central, not optional.
 
-The required answer flow is:
+Required answer flow:
 
-1. Receive the user question.
+1. Receive a learner question.
 2. Retrieve relevant chunks from trusted educational content.
-3. Pass only the necessary evidence and user context to the model.
-4. Generate an answer constrained by the retrieved evidence.
-5. Return the answer with source information or source IDs.
+3. Pass evidence, recent context, and learner memory into answer generation.
+4. Produce an answer grounded in that evidence.
+5. Return answer plus source references whenever possible.
 
 Design rule:
 
 `Retrieved evidence has priority over model prior knowledge.`
 
-If retrieval confidence is low, the system should prefer:
+If evidence is weak, the system should:
 
-- asking a clarification question
-- stating uncertainty clearly
-- refusing unsupported claims
-
-It should not confidently invent facts.
+- ask for clarification
+- state uncertainty clearly
+- avoid unsupported claims
 
 ## 6. Conversation Continuity Design
 
-To prevent context loss, conversation memory should be separated into two layers.
+The project uses two memory layers.
 
 ### Short-term memory
 
-Used for natural ongoing conversation.
+Used for active conversation:
 
-- recent messages in the current chat session
-- active problem currently being discussed
-- latest hints and responses
+- recent chat messages
+- active tutoring exchange
+- latest stored assistant responses
 
 ### Long-term learning memory
 
-Used for personalization across sessions.
+Used across sessions:
 
-- weak concepts
-- recent mistakes
-- preferred explanation style
-- current study unit
-- review backlog
+- weak concept summary
+- history summary
+- tutoring preferences
 
-Prompt assembly for each tutoring request should combine:
+Each tutoring request should combine:
 
-- recent chat context
-- long-term learner memory summary
+- recent conversation
+- long-term learner memory
 - retrieved RAG evidence
 
-Do not inject the full chat history on every request.
-Use summaries and bounded context windows.
+Do not inject unbounded chat history into every request.
 
 ## 7. Wrong-Answer Review Pipeline
 
-This is a core differentiator of the project.
+This flow is already partially implemented.
 
-Expected flow:
+Current implemented behavior:
 
 1. Student submits an answer.
-2. System grades it as correct or incorrect.
-3. If incorrect, save the attempt.
-4. Link the failure to one or more concepts.
-5. Generate a grounded explanation using trusted content.
-6. Add a follow-up review item.
-7. Re-serve similar or prerequisite questions later.
-8. Repeat until the concept is stabilized.
+2. System checks correctness.
+3. Attempt is stored.
+4. If incorrect, a `WrongAnswerNote` is created.
+5. A `ReviewQueue` item is scheduled.
+6. Review completion can mark the queue item and note as reviewed.
 
-This pipeline should support:
+Target future behavior:
 
-- immediate feedback
 - concept-based remediation
-- repeated practice
-- spaced review scheduling
+- generated grounded explanations
+- targeted follow-up questions
+- spaced repetition refinement
 
-The system should not treat a wrong answer as a one-time event.
-It should treat it as a learning signal.
+The system should treat wrong answers as a persistent learning signal.
 
-## 8. Recommended Domain Model
-
-Minimum backend entities for the real product:
+## 8. Domain Model Status
 
 ### Already present
 
 - `User`
-
-### Needed next
-
 - `Concept`
-  - subject, unit, concept name, description
-
-- `Document`
-  - source title, source type, trust level, subject, unit
-
-- `DocumentChunk`
-  - document reference, chunk text, embedding reference, metadata
-
 - `Problem`
-  - question text, answer, explanation, difficulty, type, related concepts
-
-- `ChatSession`
-  - user, title, status, created time, updated time
-
-- `ChatMessage`
-  - session, role, content, source references, created time
-
 - `UserProblemAttempt`
-  - user, problem, submitted answer, correctness, feedback, timestamp
-
 - `WrongAnswerNote`
-  - user, attempt, concept tags, explanation, review status
-
 - `ReviewQueue`
-  - user, concept or problem reference, next review time, priority, status
-
+- `ChatSession`
+- `ChatMessage`
 - `LearningMemory`
-  - user, summarized weak concepts, history summary, preferences
+- `RagDocument`
+- `DocumentChunk`
 
-## 9. API Direction
+### Still needed later
 
-Suggested MVP APIs:
+- richer analytics entities if dashboarding is added
+- persistent vector representation / vector index integration
+- optional source confidence model
+
+## 9. API Status
 
 ### Auth
 
 - `POST /api/auth/signup`
 - `POST /api/auth/login`
 
+### User
+
+- `POST /api/users`
+- `GET /api/users`
+
 ### Chat
 
 - `POST /api/chat/sessions`
+- `GET /api/chat/sessions`
 - `GET /api/chat/sessions/{sessionId}`
 - `GET /api/chat/sessions/{sessionId}/messages`
 - `POST /api/chat/sessions/{sessionId}/messages`
+- `POST /api/chat/sessions/{sessionId}/close`
+
+### Learning Memory
+
+- `GET /api/memory/{userId}`
+- `PUT /api/memory/{userId}`
 
 ### Problems
 
@@ -244,21 +239,28 @@ Suggested MVP APIs:
 
 ### Review
 
-- `GET /api/reviews`
-- `POST /api/reviews/{reviewId}/solve`
+- `GET /api/reviews/wrong-answers/{userId}`
+- `GET /api/reviews/queue/{userId}`
+- `POST /api/reviews/{reviewId}/complete`
 
 ### RAG
 
-- `POST /api/rag/documents`
+- `POST /api/rag/upload`
 - `POST /api/rag/query`
+- `POST /api/rag/generate-questions?fileName=...`
 
-### Analytics
+### Tutor
 
-- `GET /api/analytics/weaknesses`
+- `POST /api/tutor/sessions/{sessionId}/ask`
 
-## 10. Recommended Technology Direction
+### Legacy / non-primary APIs still present
 
-Current backend stack is already aligned with:
+- `/api/session/*`
+- older wrong-answer / weakness-analysis endpoints
+
+## 10. Technology Direction
+
+Current stack:
 
 - Java 17
 - Spring Boot
@@ -266,100 +268,163 @@ Current backend stack is already aligned with:
 - Spring Data JPA
 - PostgreSQL
 - JWT
+- Redis
+- LangChain4j
+- PDFBox
 
-Recommended additions:
+Current test stack:
 
-- `pgvector` for vector storage in PostgreSQL
-- LLM API integration for grounded tutoring
-- document parsing and embedding ingestion pipeline
+- Spring Boot Test
+- H2
+- MockMvc
 
-Recommended practical first version:
+Recommended next additions:
 
-`Spring Boot + PostgreSQL + pgvector + external LLM API`
+- `pgvector`
+- persistent embedding storage
+- reranking / hybrid retrieval strategy
 
-This keeps the architecture simple while supporting RAG in the same database environment.
+## 11. Implementation Progress by Phase
 
-## 11. Implementation Priority
+### Phase 1: backend foundation
 
-The project should not jump straight into a full AI platform.
-Build it in this order.
+Status: `done`
 
-### Phase 1: stabilize backend foundation
-
-- keep current auth and user flow
-- add validation and error handling
-- add tests for signup and login
+- auth/user base exists
+- signup/login works
+- build and test run
 
 ### Phase 2: learning domain
 
-- add `Concept`
-- add `Problem`
-- add `UserProblemAttempt`
-- add problem submission and grading APIs
+Status: `done`
+
+- `Concept`
+- `Problem`
+- `UserProblemAttempt`
+- problem submission and grading
 
 ### Phase 3: wrong-answer pipeline
 
-- add `WrongAnswerNote`
-- add `ReviewQueue`
-- connect incorrect attempts to review scheduling
+Status: `partially done`
+
+- `WrongAnswerNote`
+- `ReviewQueue`
+- review completion
+
+Still needed:
+
+- smarter concept diagnosis
+- stronger review scheduling strategy
 
 ### Phase 4: chat continuity
 
-- add `ChatSession`
-- add `ChatMessage`
-- add learner memory summary model
+Status: `done`
+
+- `ChatSession`
+- `ChatMessage`
+- `LearningMemory`
 
 ### Phase 5: RAG
 
-- document ingestion
+Status: `partially done`
+
+- PDF ingestion
 - chunking
-- embeddings
-- vector retrieval
-- evidence-based prompt assembly
+- keyword retrieval
+- optional embedding retrieval
+- grounded query API
+
+Still needed:
+
+- persistent vectors
+- filtering by document / subject / unit
+- retrieval quality improvements
 
 ### Phase 6: tutoring intelligence
 
-- grounded answer generation
-- hint generation
-- concept-based remediation
-- answer source references
+Status: `partially done`
+
+- grounded tutor ask flow exists
+- fallback answer generation exists
+- sources are stored with tutor messages
+
+Still needed:
+
+- structured answer format
+- stronger citation policy
+- safer evidence sufficiency handling
 
 ### Phase 7: analytics and refinement
 
-- weak concept dashboards
-- review completion tracking
-- prompt quality tuning
-- hallucination reduction policy improvements
+Status: `not started`
 
-## 12. Non-Negotiable Design Rules
+## 12. Verification Status
 
-Any future agent continuing this project should follow these rules:
+Verified manually:
 
-1. Do not turn this into a generic open-ended chatbot.
-2. Keep RAG grounded in trusted educational content.
-3. Preserve chat continuity across sessions.
-4. Treat wrong answers as review signals, not just grading results.
-5. Prefer explicit source-linked answers over fluent unsupported answers.
-6. Keep the architecture modular so auth, tutoring, RAG, and review can evolve separately.
+- signup
+- concept creation
+- problem creation
+- correct answer submission
+- wrong answer submission
+- wrong-answer note creation
+- review queue creation
+- chat session creation
+- learning memory update
+- PDF upload
+- `rag/query`
+- `rag/generate-questions`
+- `tutor/ask`
+- chat message persistence
 
-## 13. What the Next Agent Should Do
+Verified automatically:
 
-If an agent reads this file and continues development, the recommended immediate next tasks are:
+- H2-based integration tests added
+- `./gradlew.bat test` passes
+- current integration suite covers:
+  - auth signup/login
+  - wrong-answer review creation
+  - PDF upload -> RAG query -> tutor ask -> chat persistence
 
-1. Review the current auth-based backend structure.
-2. Add the first real tutoring domain entities:
-   - `Concept`
-   - `Problem`
-   - `UserProblemAttempt`
-3. Implement problem submission and correctness evaluation.
-4. Add wrong-answer persistence and a simple review queue.
-5. After that, begin the first RAG ingestion and retrieval module.
+Important verification note:
 
-## 14. Final Summary
+- in this environment, PowerShell `Invoke-RestMethod` produced unreliable Korean JSON payload encoding
+- `curl.exe` with UTF-8 JSON files worked correctly
 
-This repository should evolve into:
+## 13. Known Gaps
 
-`A RAG-based personalized AI tutoring system that minimizes hallucinations, remembers student learning context across sessions, and automates review for wrong answers.`
+1. Retrieval searches across the full uploaded document pool.
+   - responses may cite older uploaded PDFs alongside the newest one
+   - document-specific filtering is still needed
 
-The current implementation is only the authentication and user-management foundation.
-Future work must build the tutoring, memory, RAG, and review layers on top of that base.
+2. Embeddings are stored in memory only.
+   - no persistent vector DB
+
+3. Grading is simplistic.
+   - direct normalized string equality only
+
+4. Legacy Redis-backed modules still exist.
+   - they are not the main architecture direction
+
+5. Test coverage is still limited.
+   - no review-complete test
+   - no `rag/generate-questions` test
+   - no broad negative-path coverage
+
+## 14. Recommended Next Work
+
+1. Introduce persistent vector storage with `pgvector`
+2. Add retrieval filters by uploaded document / subject / unit
+3. Improve tutor answer structure and evidence policy
+4. Upgrade grading logic beyond exact string equality
+5. Expand automated test coverage
+6. Add validation and exception handling cleanup
+
+## 15. Final Summary
+
+This repository has progressed beyond the initial auth foundation and now contains a functioning backend MVP for:
+
+`document upload + RAG retrieval + tutor answering + chat persistence + learner memory + wrong-answer review`
+
+The next stage is not basic scaffolding anymore.
+The next stage is `retrieval quality, persistence quality, and tutoring quality`.

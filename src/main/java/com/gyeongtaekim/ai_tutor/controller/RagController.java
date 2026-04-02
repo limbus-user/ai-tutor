@@ -1,5 +1,7 @@
 package com.gyeongtaekim.ai_tutor.controller;
 
+import com.gyeongtaekim.ai_tutor.dto.RagDocumentUploadResponse;
+import com.gyeongtaekim.ai_tutor.dto.RagQueryResponse;
 import com.gyeongtaekim.ai_tutor.service.RagService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -14,32 +16,23 @@ public class RagController {
     private final RagService ragService;
 
     @PostMapping("/upload")
-    public ResponseEntity<String> uploadPdf(@RequestParam("file") MultipartFile file) {
-        try {
-            ragService.processPdf(file);
-            return ResponseEntity.ok("PDF processed successfully");
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body("Error processing PDF: " + e.getMessage());
-        }
+    public ResponseEntity<RagDocumentUploadResponse> uploadPdf(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "subject", required = false) String subject,
+            @RequestParam(value = "unitName", required = false) String unitName,
+            @RequestParam(value = "trustLevel", required = false) String trustLevel
+    ) throws Exception {
+        return ResponseEntity.ok(ragService.processPdf(file, subject, unitName, trustLevel));
     }
 
     @PostMapping("/query")
-    public ResponseEntity<String> query(@RequestBody String query) {
-        try {
-            String response = ragService.query(query);
-            return ResponseEntity.ok(response);
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body("Error querying: " + e.getMessage());
-        }
+    public ResponseEntity<RagQueryResponse> query(@RequestBody String query) {
+        return ResponseEntity.ok(ragService.query(query));
     }
 
     @PostMapping("/generate-questions")
-    public ResponseEntity<String> generateQuestions(@RequestParam("fileName") String fileName) {
-        try {
-            String questions = ragService.generateQuestions(fileName);
-            return ResponseEntity.ok(questions);
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body("Error generating questions: " + e.getMessage());
-        }
+    public ResponseEntity<String> generateQuestions(@RequestParam("fileName") String fileName) throws Exception {
+        String questions = ragService.generateQuestions(fileName);
+        return ResponseEntity.ok(questions);
     }
 }

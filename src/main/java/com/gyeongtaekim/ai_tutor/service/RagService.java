@@ -1,116 +1,348 @@
 package com.gyeongtaekim.ai_tutor.service;
 
+import com.gyeongtaekim.ai_tutor.domain.DocumentChunk;
+import com.gyeongtaekim.ai_tutor.domain.RagDocument;
+import com.gyeongtaekim.ai_tutor.dto.RagDocumentUploadResponse;
+import com.gyeongtaekim.ai_tutor.dto.RagQueryResponse;
+import com.gyeongtaekim.ai_tutor.repository.DocumentChunkRepository;
+import com.gyeongtaekim.ai_tutor.repository.RagDocumentRepository;
 import dev.langchain4j.data.document.Document;
 import dev.langchain4j.data.document.DocumentSplitter;
 import dev.langchain4j.data.document.splitter.DocumentSplitters;
+import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
-import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
-import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
-import dev.langchain4j.rag.content.retriever.EmbeddingStoreContentRetriever;
-import dev.langchain4j.service.AiServices;
-import dev.langchain4j.store.embedding.EmbeddingStore;
+import dev.langchain4j.store.embedding.EmbeddingMatch;
+import dev.langchain4j.store.embedding.EmbeddingSearchRequest;
 import dev.langchain4j.store.embedding.inmemory.InMemoryEmbeddingStore;
 import lombok.RequiredArgsConstructor;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class RagService {
 
-    @Value("${openai.api.key}")
-    private String openaiApiKey;
+    @Value("${upload.path:uploads}")
+    private String uploadPath;
 
-    private final EmbeddingStore<TextSegment> embeddingStore = new InMemoryEmbeddingStore();
+    @Value("${openai.api.key:}")
+    private String openAiApiKey;
 
-    // private final EmbeddingModel embeddingModel = OpenAiEmbeddingModel.builder()
-    //         .apiKey(openaiApiKey)
-    //         .modelName("text-embedding-ada-002")
-    //         .build();
+    @Value("${openai.embedding.model:text-embedding-3-small}")
+    private String openAiEmbeddingModelName;
 
-    // private final ChatLanguageModel chatModel = OpenAiChatModel.builder()
-    //         .apiKey(openaiApiKey)
-    //         .modelName("gpt-3.5-turbo")
-    //         .build();
+    private final RagDocumentRepository ragDocumentRepository;
+    private final DocumentChunkRepository documentChunkRepository;
 
-    // private final RagAssistant assistant = AiServices.builder(RagAssistant.class)
-    //         .chatLanguageModel(chatModel)
-    //         .contentRetriever(EmbeddingStoreContentRetriever.builder()
-    //                 .embeddingStore(embeddingStore)
-    //                 .embeddingModel(embeddingModel)
-    //                 .maxResults(5)
-    //                 .minScore(0.7)
-    //                 .build())
-    //         .build();
+    private final InMemoryEmbeddingStore<DocumentChunk> embeddingStore = new InMemoryEmbeddingStore<>();
+    private volatile boolean embeddingsInitialized = false;
 
-    public void processPdf(MultipartFile file) throws IOException {
-        String text = extractTextFromPdf(file);
-        Document document = Document.from(text);
-        DocumentSplitter splitter = DocumentSplitters.recursive(300, 0);
-        List<TextSegment> segments = splitter.split(document);
-        // embeddingStore.addAll(embeddingModel.embedAll(segments).content(), segments);
+    public RagDocumentUploadResponse processPdf(
+            MultipartFile file,
+            String subject,
+            String unitName,
+            String trustLevel
+    ) throws IOException {
+        if (file.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "File is empty");
+        }
+
+        Path uploadDir = Paths.get(uploadPath);
+        Files.createDirectories(uploadDir);
+
+        String storedFileName = System.currentTimeMillis() + "_" + file.getOriginalFilename();
+        Path filePath = uploadDir.resolve(storedFileName);
+        Files.copy(file.getInputStream(), filePath, StandardCopyOption.REPLACE_EXISTING);
+
+        String text = extractTextFromBytes(file.getBytes());
+        List<TextSegment> segments = splitIntoSegments(text);
+
+        RagDocument ragDocument = ragDocumentRepository.save(new RagDocument(
+                file.getOriginalFilename(),
+                RagDocument.SourceType.PDF,
+                defaultValue(trustLevel, "internal"),
+                defaultValue(subject, "general"),
+                defaultValue(unitName, "general"),
+                storedFileName,
+                text
+        ));
+
+        List<DocumentChunk> chunks = new ArrayList<>();
+        for (int i = 0; i < segments.size(); i++) {
+            String metadata = "subject=" + ragDocument.getSubject()
+                    + ", unit=" + ragDocument.getUnitName()
+                    + ", source=" + ragDocument.getStoredFileName()
+                    + ", chunkIndex=" + i;
+            chunks.add(new DocumentChunk(ragDocument, i, segments.get(i).text(), metadata));
+        }
+        documentChunkRepository.saveAll(chunks);
+        addChunksToEmbeddingStore(chunks);
+
+        return new RagDocumentUploadResponse(ragDocument, chunks.size());
     }
 
-    public String query(String query) {
-        // Mock response for testing
-        return "Mock response: " + query;
+    public RagQueryResponse query(String query) {
+        List<DocumentChunk> allChunks = documentChunkRepository.findAll();
+        if (allChunks.isEmpty()) {
+            return new RagQueryResponse(
+                    query,
+                    "검색 가능한 문서가 없습니다. 먼저 /api/rag/upload 로 PDF를 적재해 주세요.",
+                    List.of()
+            );
+        }
+
+        List<DocumentChunk> topChunks = retrieveRelevantChunks(query, allChunks);
+        if (topChunks.isEmpty()) {
+            return new RagQueryResponse(
+                    query,
+                    "질문과 직접적으로 일치하는 문서 근거를 찾지 못했습니다. 질문을 더 구체적으로 입력해 주세요.",
+                    List.of()
+            );
+        }
+
+        String answer = topChunks.stream()
+                .map(chunk -> chunk.getChunkText().trim())
+                .collect(Collectors.joining("\n\n"));
+        List<String> sources = topChunks.stream()
+                .map(chunk -> chunk.getDocument().getTitle() + " [chunk " + chunk.getChunkIndex() + "]")
+                .distinct()
+                .toList();
+
+        return new RagQueryResponse(query, answer, sources);
     }
 
-    public String generateQuestions(String fileName) throws IOException {
-        System.out.println("DEBUG: generateQuestions called with fileName: " + fileName);
+    public String generateQuestions(String fileName) {
+        RagDocument document = ragDocumentRepository.findByStoredFileName(fileName)
+                .orElseGet(() -> loadLegacyDocument(fileName));
+
+        List<DocumentChunk> chunks = documentChunkRepository.findByDocumentIdOrderByChunkIndexAsc(document.getId());
+        String preview = buildPreview(document.getExtractedText());
+        String generatedQuestions = buildQuestionSet(document.getExtractedText(), chunks);
+
+        return "File: " + fileName
+                + "\n\n[Extracted Text Preview]\n"
+                + preview
+                + "\n\n[Generated Questions]\n"
+                + generatedQuestions;
+    }
+
+    private List<DocumentChunk> retrieveRelevantChunks(String query, List<DocumentChunk> allChunks) {
+        List<DocumentChunk> embeddedMatches = retrieveWithEmbeddings(query);
+        if (!embeddedMatches.isEmpty()) {
+            return embeddedMatches;
+        }
+
+        return allChunks.stream()
+                .map(chunk -> new ScoredChunk(chunk, scoreChunk(query, chunk.getChunkText())))
+                .filter(scored -> scored.score > 0)
+                .sorted(Comparator.comparingInt(ScoredChunk::score).reversed())
+                .limit(3)
+                .map(ScoredChunk::chunk)
+                .toList();
+    }
+
+    private List<DocumentChunk> retrieveWithEmbeddings(String query) {
+        if (!embeddingEnabled()) {
+            return List.of();
+        }
+
+        initializeEmbeddingsIfNeeded();
+
         try {
-            // 저장된 PDF 파일 읽기
-            Path filePath = Paths.get("uploads", fileName);
-            System.out.println("DEBUG: filePath: " + filePath.toAbsolutePath());
+            EmbeddingModel embeddingModel = createEmbeddingModel();
+            Embedding queryEmbedding = embeddingModel.embed(query).content();
+            EmbeddingSearchRequest request = new EmbeddingSearchRequest(queryEmbedding, 3, 0.55, null);
+
+            return embeddingStore.search(request).matches().stream()
+                    .sorted(Comparator.comparingDouble(EmbeddingMatch<DocumentChunk>::score).reversed())
+                    .map(EmbeddingMatch::embedded)
+                    .distinct()
+                    .toList();
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    private synchronized void initializeEmbeddingsIfNeeded() {
+        if (embeddingsInitialized || !embeddingEnabled()) {
+            return;
+        }
+
+        List<DocumentChunk> chunks = documentChunkRepository.findAll();
+        addChunksToEmbeddingStore(chunks);
+        embeddingsInitialized = true;
+    }
+
+    private void addChunksToEmbeddingStore(List<DocumentChunk> chunks) {
+        if (chunks.isEmpty() || !embeddingEnabled()) {
+            return;
+        }
+
+        try {
+            EmbeddingModel embeddingModel = createEmbeddingModel();
+            List<TextSegment> segments = chunks.stream()
+                    .map(chunk -> TextSegment.from(chunk.getChunkText()))
+                    .toList();
+            List<Embedding> embeddings = embeddingModel.embedAll(segments).content();
+            embeddingStore.addAll(embeddings, chunks);
+            embeddingsInitialized = true;
+        } catch (Exception ignored) {
+            embeddingsInitialized = false;
+        }
+    }
+
+    private EmbeddingModel createEmbeddingModel() {
+        return OpenAiEmbeddingModel.builder()
+                .apiKey(openAiApiKey)
+                .modelName(openAiEmbeddingModelName)
+                .timeout(Duration.ofSeconds(30))
+                .build();
+    }
+
+    private boolean embeddingEnabled() {
+        return openAiApiKey != null && !openAiApiKey.isBlank();
+    }
+
+    private RagDocument loadLegacyDocument(String fileName) {
+        try {
+            Path filePath = Paths.get(uploadPath, fileName);
             if (!Files.exists(filePath)) {
                 throw new IOException("File not found: " + fileName);
             }
+
             byte[] bytes = Files.readAllBytes(filePath);
-            System.out.println("DEBUG: File read successfully, size: " + bytes.length);
-
-            // 텍스트 추출
             String text = extractTextFromBytes(bytes);
-            System.out.println("DEBUG: Text extracted, length: " + text.length());
+            RagDocument ragDocument = ragDocumentRepository.save(new RagDocument(
+                    fileName,
+                    RagDocument.SourceType.PDF,
+                    "legacy-upload",
+                    "general",
+                    "general",
+                    fileName,
+                    text
+            ));
 
-            // 문서 처리 및 벡터화 (주석 처리된 부분은 실제로는 실행되지 않음)
-            Document document = Document.from(text);
-            DocumentSplitter splitter = DocumentSplitters.recursive(300, 0);
-            List<TextSegment> segments = splitter.split(document);
-            System.out.println("DEBUG: Document processed, segments: " + segments.size());
-
-            // 문제 생성 쿼리 (Mock 응답)
-            String query = "이 문서의 내용을 기반으로 5개의 객관식 문제를 생성해 주세요. 각 문제는 4개의 선택지와 정답을 포함하세요.";
-            String result = "Mock generated questions for " + fileName + ": 1. What is AI? A) Artificial Intelligence B) Animal Instinct C) Automated Interface D) None - Answer: A 2. How does RAG work? A) Retrieval-Augmented Generation B) Random Access Generator C) Real-time Analysis Graph D) None - Answer: A";
-            System.out.println("DEBUG: Returning result: " + result.substring(0, Math.min(100, result.length())));
-            return result;
-        } catch (Exception e) {
-            // 오류 발생 시에도 Mock 응답 반환 (디버깅용)
-            System.out.println("DEBUG: Exception occurred: " + e.getMessage());
-            e.printStackTrace();
-            String result = "Mock generated questions for " + fileName + " (with error: " + e.getMessage() + "): 1. What is AI? A) Artificial Intelligence B) Animal Instinct C) Automated Interface D) None - Answer: A";
-            return result;
+            List<TextSegment> segments = splitIntoSegments(text);
+            List<DocumentChunk> chunks = new ArrayList<>();
+            for (int i = 0; i < segments.size(); i++) {
+                chunks.add(new DocumentChunk(ragDocument, i, segments.get(i).text(), "source=" + fileName + ", chunkIndex=" + i));
+            }
+            documentChunkRepository.saveAll(chunks);
+            addChunksToEmbeddingStore(chunks);
+            return ragDocument;
+        } catch (IOException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
         }
     }
 
-    private String extractTextFromPdf(MultipartFile file) throws IOException {
-        byte[] bytes = file.getBytes();
-        try (PDDocument document = Loader.loadPDF(bytes)) {
-            PDFTextStripper stripper = new PDFTextStripper();
-            return stripper.getText(document);
+    private List<TextSegment> splitIntoSegments(String text) {
+        Document document = Document.from(text);
+        DocumentSplitter splitter = DocumentSplitters.recursive(300, 30);
+        return splitter.split(document);
+    }
+
+    private String buildPreview(String text) {
+        String normalized = normalizeWhitespace(text);
+        if (normalized.isBlank()) {
+            return "(No text extracted from PDF)";
         }
+
+        int previewLength = Math.min(280, normalized.length());
+        return normalized.substring(0, previewLength) + (normalized.length() > previewLength ? "..." : "");
+    }
+
+    private String buildQuestionSet(String text, List<DocumentChunk> chunks) {
+        String normalized = normalizeWhitespace(text);
+        if (normalized.isBlank()) {
+            return "1. PDF에서 텍스트를 추출하지 못했습니다. 다른 PDF로 다시 시도해 주세요.";
+        }
+
+        List<String> candidateSentences = chunks.stream()
+                .map(DocumentChunk::getChunkText)
+                .flatMap(chunk -> List.of(chunk.split("(?<=[.!?])\\s+")).stream())
+                .map(this::normalizeWhitespace)
+                .filter(sentence -> sentence.length() >= 20)
+                .distinct()
+                .limit(4)
+                .toList();
+
+        List<String> questions = new ArrayList<>();
+        questions.add("1. 이 문서의 핵심 주제를 한 문장으로 요약하세요.");
+
+        int index = 2;
+        for (String sentence : candidateSentences) {
+            questions.add(index + ". 다음 내용을 설명하세요: " + sentence);
+            index++;
+            if (questions.size() == 5) {
+                break;
+            }
+        }
+
+        Set<String> keywords = extractKeywords(normalized);
+        for (String keyword : keywords) {
+            if (questions.size() == 5) {
+                break;
+            }
+            questions.add((questions.size() + 1) + ". 문서에서 언급된 '" + keyword + "'의 의미를 설명하세요.");
+        }
+
+        while (questions.size() < 5) {
+            questions.add((questions.size() + 1) + ". 문서 내용 중 중요한 개념 하나를 골라 설명하세요.");
+        }
+
+        return String.join("\n", questions);
+    }
+
+    private Set<String> extractKeywords(String text) {
+        return List.of(text.split("\\s+")).stream()
+                .map(token -> token.replaceAll("[^\\p{IsAlphabetic}\\p{IsDigit}가-힣]", ""))
+                .filter(token -> token.length() >= 3)
+                .limit(10)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    private int scoreChunk(String query, String chunkText) {
+        String lowerChunk = chunkText.toLowerCase(Locale.ROOT);
+        int score = 0;
+        for (String token : normalizeWhitespace(query).toLowerCase(Locale.ROOT).split("\\s+")) {
+            if (token.length() < 2) {
+                continue;
+            }
+            if (lowerChunk.contains(token)) {
+                score += 2;
+            }
+        }
+        return score;
+    }
+
+    private String defaultValue(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value.trim();
+    }
+
+    private String normalizeWhitespace(String text) {
+        return text == null ? "" : text.replaceAll("\\s+", " ").trim();
     }
 
     private String extractTextFromBytes(byte[] bytes) throws IOException {
@@ -120,7 +352,6 @@ public class RagService {
         }
     }
 
-    interface RagAssistant {
-        String chat(String message);
+    private record ScoredChunk(DocumentChunk chunk, int score) {
     }
 }
