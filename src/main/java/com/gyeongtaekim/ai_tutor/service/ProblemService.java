@@ -8,6 +8,7 @@ import com.gyeongtaekim.ai_tutor.dto.ProblemCreateRequest;
 import com.gyeongtaekim.ai_tutor.dto.ProblemResponse;
 import com.gyeongtaekim.ai_tutor.dto.ProblemSubmissionRequest;
 import com.gyeongtaekim.ai_tutor.dto.ProblemSubmissionResponse;
+import com.gyeongtaekim.ai_tutor.dto.ProblemViewResponse;
 import com.gyeongtaekim.ai_tutor.repository.ConceptRepository;
 import com.gyeongtaekim.ai_tutor.repository.ProblemRepository;
 import com.gyeongtaekim.ai_tutor.repository.UserProblemAttemptRepository;
@@ -43,16 +44,16 @@ public class ProblemService {
                 request.getAnswer(),
                 request.getExplanation(),
                 Problem.Difficulty.valueOf(request.getDifficulty().toUpperCase(Locale.ROOT)),
-                Problem.ProblemType.valueOf(request.getType().toUpperCase(Locale.ROOT)),
+                parseProblemType(request.getType()),
                 concepts
         );
         return new ProblemResponse(problemRepository.save(problem));
     }
 
-    public ProblemResponse getProblem(Long problemId) {
+    public ProblemViewResponse getProblem(Long problemId) {
         Problem problem = problemRepository.findById(problemId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Problem not found"));
-        return new ProblemResponse(problem);
+        return new ProblemViewResponse(problem);
     }
 
     public ProblemSubmissionResponse submitAnswer(Long problemId, ProblemSubmissionRequest request) {
@@ -84,5 +85,17 @@ public class ProblemService {
 
     private String normalize(String value) {
         return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private Problem.ProblemType parseProblemType(String type) {
+        if (type == null || type.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Problem type is required");
+        }
+
+        String normalized = type.trim().toUpperCase(Locale.ROOT);
+        if ("OX".equals(normalized)) {
+            return Problem.ProblemType.TRUE_FALSE;
+        }
+        return Problem.ProblemType.valueOf(normalized);
     }
 }

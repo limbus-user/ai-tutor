@@ -7,6 +7,7 @@ import com.gyeongtaekim.ai_tutor.dto.ChatSessionResponse;
 import com.gyeongtaekim.ai_tutor.service.ChatService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -55,5 +56,11 @@ public class ChatController {
     @PostMapping("/sessions/{sessionId}/close")
     public ResponseEntity<ChatSessionResponse> closeSession(@PathVariable Long sessionId) {
         return ResponseEntity.ok(chatService.closeSession(sessionId));
+    }
+
+    @DeleteMapping("/sessions/{sessionId}")
+    public ResponseEntity<Void> deleteSession(@PathVariable Long sessionId) {
+        chatService.deleteSession(sessionId);
+        return ResponseEntity.noContent().build();
     }
 }

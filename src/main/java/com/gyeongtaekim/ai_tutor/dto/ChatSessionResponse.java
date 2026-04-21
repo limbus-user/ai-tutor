@@ -11,6 +11,7 @@ public class ChatSessionResponse {
     private final Long userId;
     private final String title;
     private final String status;
+    private final String type;
     private final LocalDateTime createdAt;
     private final LocalDateTime updatedAt;
 
@@ -19,6 +20,7 @@ public class ChatSessionResponse {
         this.userId = session.getUser().getId();
         this.title = session.getTitle();
         this.status = session.getStatus().name();
+        this.type = session.getType().name();
         this.createdAt = session.getCreatedAt();
         this.updatedAt = session.getUpdatedAt();
     }

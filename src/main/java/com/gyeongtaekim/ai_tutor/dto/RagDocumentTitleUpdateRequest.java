@@ -3,8 +3,6 @@ package com.gyeongtaekim.ai_tutor.dto;
 import lombok.Getter;
 
 @Getter
-public class ChatSessionCreateRequest {
-    private Long userId;
+public class RagDocumentTitleUpdateRequest {
     private String title;
-    private String type;
 }

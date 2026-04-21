@@ -65,6 +65,10 @@ public class RagDocument {
         this.createdAt = LocalDateTime.now();
     }
 
+    public void updateTitle(String title) {
+        this.title = title;
+    }
+
     public enum SourceType {
         PDF, NOTE, PROBLEM_SET
     }

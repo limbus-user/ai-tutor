@@ -1,25 +1,84 @@
-# 교수님 시연 가이드
+# 교수님 데모 / 테스트 가이드
 
 ## 목적
 
-이 문서는 현재 구현된 `AI Tutor` 백엔드 기능을 교수님 앞에서 바로 시연할 수 있도록 정리한 실행 가이드다.
+이 문서는 현재 구현된 `AI Tutor`를 교수님 데모와 로컬 테스트용으로 바로 실행할 수 있게 정리한 가이드입니다.
 
-현재 시연 가능한 핵심 기능:
+현재 확인 가능한 핵심 기능:
 
 - PDF 업로드
-- 문서 기반 질의 응답 (`RAG`)
-- 문서 기반 질문 생성
+- 문서 기반 문제 생성
+- 문서 기반 질문응답
 - 채팅 세션 생성
-- 튜터 질문/응답 저장
+- 튜터 질문/답변
 - 학습 메모 반영
+- 프론트엔드 데모 페이지 연동
 
-## 시연 전 준비
+## 권장 모델
 
-### 1. 서버 실행
+- 권장 로컬 모델: `qwen2.5:3b`
+- 이유: 16GB RAM 환경에서 `qwen2.5:7b` 보다 안정적으로 동작할 가능성이 높음
+- 참고: `qwen2.5:7b` 는 가능하지만 문제 생성 시 느리거나 멈출 수 있음
+
+## 기본 주소
+
+- 백엔드/프론트엔드 기본 주소: `http://localhost:8080`
+- 프론트엔드 데모 페이지: `http://localhost:8080/index.html`
+
+## 완전 처음부터 다시 시작하기
+
+### 핵심 원칙
+
+- `userId`, `documentId`, `sessionId` 는 매번 증가하는 것이 정상입니다.
+- 숫자가 커졌다고 오류가 아닙니다.
+- 가장 안전한 방법은 항상 `바로 앞 응답에서 받은 값`을 다음 요청에 넣는 것입니다.
+
+즉, 완전 초기화를 하지 않아도 테스트는 가능합니다.
+
+### 정말 처음부터 새로 시작하고 싶을 때
+
+1. 서버 종료
+
+```powershell
+Ctrl + C
+```
+
+2. 테스트용 json 파일 정리
+
+```powershell
+Remove-Item .\user.json -ErrorAction SilentlyContinue
+Remove-Item .\session.json -ErrorAction SilentlyContinue
+Remove-Item .\ask.json -ErrorAction SilentlyContinue
+```
+
+3. 업로드 폴더 테스트 파일 정리
+
+주의:
+
+- 이 작업은 기존 업로드 테스트 파일을 지웁니다.
+- 제출본을 보존해야 하면 삭제하지 말고 그대로 두고 새 파일만 다시 업로드해도 됩니다.
+
+```powershell
+Get-ChildItem .\uploads
+```
+
+필요할 때만 직접 삭제:
+
+```powershell
+Remove-Item .\uploads\*_testpdf.pdf -ErrorAction SilentlyContinue
+```
+
+4. DB는 선택적으로 초기화
+
+가장 안전한 방법은 DB를 굳이 비우지 않고, 새 `userId`, 새 `documentId`, 새 `sessionId` 로 진행하는 것입니다.
+
+## 1. 서버 실행
 
 프로젝트 루트에서 실행:
 
 ```powershell
+$env:OLLAMA_ENABLED = "true"
+$env:OLLAMA_CHAT_MODEL = "qwen2.5:3b"
 .\gradlew.bat bootRun
 ```
 
@@ -27,108 +86,175 @@
 
 ```text
 Started AiTutorApplication
+Tomcat started on port 8080
 ```
 
 주의:
 
-- `bootRun`은 서버를 계속 실행 상태로 유지하는 태스크다.
-- 멈춘 것이 아니라 정상 대기 상태다.
+- `bootRun` 은 서버가 계속 떠 있는 상태가 정상입니다.
 - 종료는 `Ctrl + C`
 
-### 2. 테스트 터미널 별도 열기
+## 2. 프론트엔드로 빠르게 확인하는 방법
 
-서버를 실행한 터미널은 그대로 두고, 새 PowerShell 창에서 아래 명령을 실행한다.
+브라우저에서 아래 주소를 엽니다.
 
-기본 주소:
+```text
+http://localhost:8080/index.html
+```
+
+화면에서 바로 가능한 흐름:
+
+1. `API 연결 확인`
+2. `사용자 생성`
+3. `학습 메모 저장`
+4. `PDF 업로드`
+5. `문제 생성`
+6. `생성된 문제 풀이`
+7. `세션 생성`
+8. `튜터 질문`
+9. `채팅 메시지 조회`
+
+프론트엔드에서 자동으로 이어지는 값:
+
+- 사용자 생성 후 `userId`
+- PDF 업로드 후 내부 `documentId`
+- 세션 생성 후 `sessionId`
+
+프론트엔드 확인 포인트:
+
+- 결과 카드에 각 API 응답이 누적되는지
+- PDF 업로드 후 `현재 선택 문서`가 표시되는지
+- 문제 생성 결과에 `type`, `correctAnswer`, `explanation` 이 있는지
+- 생성된 문제 카드에서 직접 답을 선택하거나 입력할 수 있는지
+- 제출 후 정답/오답, 정답, 모범답안, 해설이 표시되는지
+- 튜터 답변에 `sources` 가 비어 있지 않은지
+- `채팅 메시지 조회`에서 USER/ASSISTANT 메시지가 저장되어 있는지
+
+## 3. PowerShell로 직접 API 테스트하는 방법
+
+서버를 띄운 창은 그대로 두고, 새 PowerShell 창에서 아래 명령을 실행합니다.
 
 ```powershell
 $base = "http://localhost:8080"
 ```
 
-## 시연 시나리오
+## 권장 테스트 순서
 
-권장 흐름:
-
-1. PDF 업로드
-2. PDF 기반 질문 생성
-3. 문서 기반 질의 응답
+1. 사용자 생성
+2. PDF 업로드
+3. 문서 기반 문제 생성
 4. 채팅 세션 생성
 5. 튜터 질문
-6. 채팅 저장 결과 확인
+6. 채팅 메시지 확인
 
-## 1. PDF 업로드
+## 3-1. 사용자 생성
+
+```powershell
+@'
+{"email":"demo@example.com","password":"secret123","name":"Demo User"}
+'@ | Set-Content -Path .\user.json -Encoding utf8
+```
+
+```powershell
+curl.exe -X POST "$base/api/users" `
+  -H "Content-Type: application/json; charset=utf-8" `
+  --data-binary "@user.json"
+```
+
+예시 응답:
+
+```json
+{"id":1,"email":"demo@example.com","name":"Demo User"}
+```
+
+## 3-2. PDF 업로드
 
 예시 PDF 경로:
 
 ```text
-C:\Users\AI2-28\Desktop\gyeong tae kim 202104002\testpdf.pdf
+C:\Users\USER\Desktop\ai-tutor\uploads\testpdf.pdf
 ```
-
-실행:
 
 ```powershell
 curl.exe -X POST "$base/api/rag/upload" `
-  -F "file=@C:\Users\AI2-28\Desktop\gyeong tae kim 202104002\testpdf.pdf" `
-  -F "subject=computer-science" `
-  -F "unitName=algorithm" `
-  -F "trustLevel=high"
+  -F "file=@C:\Users\USER\Desktop\ai-tutor\uploads\testpdf.pdf" `
+  -F "subject=컴퓨터과학" `
+  -F "unitName=알고리즘" `
+  -F "trustLevel=높음"
 ```
 
-기대 결과 예시:
+예시 응답:
 
 ```json
-{"chunkCount":2,"documentId":2,"title":"testpdf.pdf","storedFileName":"1775112343375_testpdf.pdf"}
+{"chunkCount":2,"documentId":13,"title":"testpdf.pdf","storedFileName":"1775540174911_testpdf.pdf"}
 ```
 
-설명 포인트:
+## 3-3. 문서 기반 문제 생성
 
-- PDF를 업로드하면 텍스트를 추출한다.
-- 문서를 chunk 단위로 분리해 저장한다.
-- 이후 질문 시 이 저장된 chunk를 근거로 검색한다.
+문제 생성은 `type` 과 `count` 를 받을 수 있습니다.
 
-## 2. PDF 기반 질문 생성
+지원 `type`:
 
-업로드 응답의 `storedFileName` 값을 사용한다.
+- `mixed`
+- `multiple_choice`
+- `ox`
+- `short_answer`
 
-실행:
+혼합형:
 
 ```powershell
-curl.exe -X POST "$base/api/rag/generate-questions?fileName=1775112343375_testpdf.pdf"
+curl.exe -X POST "$base/api/rag/generate-questions?documentId=13&type=mixed&count=5"
 ```
 
-기대 결과:
-
-- 문서 미리보기
-- 문서 내용을 바탕으로 생성한 질문 목록
-
-설명 포인트:
-
-- 업로드한 문서를 바탕으로 학습 질문을 자동 생성할 수 있다.
-- 현재는 초안 수준의 질문 생성이며, 향후 품질 고도화가 가능하다.
-
-## 3. 문서 기반 질의 응답
-
-실행:
+객관식:
 
 ```powershell
-curl.exe -X POST "$base/api/rag/query" `
-  -H "Content-Type: text/plain; charset=utf-8" `
-  --data-binary "업로드한 PDF의 핵심 내용을 요약해줘"
+curl.exe -X POST "$base/api/rag/generate-questions?documentId=13&type=multiple_choice&count=3"
 ```
 
-기대 결과:
+OX:
 
-- 문서 근거 기반 답변
-- `sources` 목록
+```powershell
+curl.exe -X POST "$base/api/rag/generate-questions?documentId=13&type=ox&count=3"
+```
 
-설명 포인트:
+주관식:
 
-- 질의가 들어오면 관련 chunk를 검색한다.
-- 검색된 문서 근거를 기반으로 응답을 구성한다.
+```powershell
+curl.exe -X POST "$base/api/rag/generate-questions?documentId=13&type=short_answer&count=3"
+```
 
-## 4. 채팅 세션 생성
+예시 응답 구조:
 
-아래는 `userId = 1` 기준 예시다.
+```json
+{
+  "documentId": 13,
+  "title": "testpdf.pdf",
+  "storedFileName": "1775540174911_testpdf.pdf",
+  "questions": [
+    {
+      "order": 1,
+      "type": "multiple_choice",
+      "question": "...",
+      "choices": ["...", "...", "...", "..."],
+      "correctAnswer": "...",
+      "modelAnswer": "...",
+      "explanation": "...",
+      "sourceEvidence": "...",
+      "difficulty": "medium"
+    }
+  ]
+}
+```
+
+확인 포인트:
+
+- `questions` 배열이 내려오는지
+- 각 항목에 `type`, `correctAnswer`, `explanation` 이 있는지
+- 객관식이면 `choices` 4개가 있는지
+- OX면 `choices` 가 `["O","X"]` 인지
+
+## 3-4. 채팅 세션 생성
 
 ```powershell
 @'
@@ -142,114 +268,195 @@ curl.exe -X POST "$base/api/chat/sessions" `
   --data-binary "@session.json"
 ```
 
-기대 결과 예시:
+예시 응답:
 
 ```json
-{"id":2,"userId":1,"title":"PDF 기반 튜터 데모","status":"ACTIVE",...}
+{"id":5,"userId":1,"title":"PDF 기반 튜터 데모","status":"ACTIVE","createdAt":"...","updatedAt":"..."}
 ```
 
-설명 포인트:
-
-- 학습 대화는 세션 단위로 저장된다.
-- 이후 질문과 응답은 이 세션에 누적된다.
-
-## 5. 튜터 질문
-
-아래 예시는 `sessionId = 2` 기준이다.
+## 3-5. 튜터 질문
 
 ```powershell
 @'
-{"question":"업로드한 PDF를 바탕으로 핵심 개념을 쉽게 설명해줘"}
+{"question":"상속이 뭐야?","documentId":13}
 '@ | Set-Content -Path .\ask.json -Encoding utf8
 ```
 
 ```powershell
-curl.exe -X POST "$base/api/tutor/sessions/2/ask" `
+curl.exe -X POST "$base/api/tutor/sessions/5/ask" `
   -H "Content-Type: application/json; charset=utf-8" `
   --data-binary "@ask.json"
 ```
 
-기대 결과:
-
-- 질문 저장
-- 문서 검색 실행
-- 학습 메모 반영
-- 답변 생성
-- 응답 내 `sources` 포함
-
-설명 포인트:
-
-- 튜터는 최근 대화와 학습 메모를 함께 반영한다.
-- OpenAI API Key가 없더라도 fallback 기반 답변이 동작한다.
-
-## 6. 채팅 저장 결과 확인
-
-`sessionId = 2` 예시:
+후속 질문 예시:
 
 ```powershell
-curl.exe "$base/api/chat/sessions/2/messages"
+@'
+{"question":"그럼 다형성이랑 차이점이 뭐야?","documentId":13}
+'@ | Set-Content -Path .\ask.json -Encoding utf8
 ```
 
-기대 결과:
+```powershell
+curl.exe -X POST "$base/api/tutor/sessions/5/ask" `
+  -H "Content-Type: application/json; charset=utf-8" `
+  --data-binary "@ask.json"
+```
 
-- USER 메시지 저장
-- ASSISTANT 메시지 저장
-- assistant 메시지에 source reference 포함
+예시 응답:
 
-설명 포인트:
+```json
+{
+  "sessionId": 5,
+  "question": "상속이 뭐야?",
+  "answer": "...",
+  "sources": ["testpdf.pdf [chunk 0]"]
+}
+```
 
-- 질문/응답이 단발성이 아니라 누적 저장된다.
-- 이후 세션 기반 학습 기억 구조로 확장할 수 있다.
+확인 포인트:
 
-## 교수님께 설명할 핵심 문장
+- `sources` 가 비어 있지 않은지
+- 답변이 업로드한 PDF 내용 기준으로 나오는지
+- 후속 질문에서도 직전 문맥을 어느 정도 이어받는지
 
-짧게 설명하면:
+## 3-6. 채팅 메시지 확인
 
-`현재 구현은 PDF를 업로드해 문서를 저장하고, 그 문서 기반으로 질문 생성과 질의응답을 수행하며, 튜터 질문과 답변을 채팅 세션에 저장하는 단계까지 구현되어 있습니다.`
+```powershell
+curl.exe "$base/api/chat/sessions/5/messages"
+```
 
-조금 더 구체적으로 설명하면:
+예시 응답:
 
-`사용자가 학습 자료 PDF를 올리면 텍스트를 추출하고 chunk로 분할 저장합니다. 이후 질문이 들어오면 관련 문서 근거를 검색하고, 그 근거를 바탕으로 답변을 생성합니다. 질문 생성 기능도 있으며, 채팅 세션과 학습 메모를 함께 반영하는 구조로 확장해 두었습니다.`
+```json
+[
+  {
+    "id": 1,
+    "sessionId": 5,
+    "role": "USER",
+    "content": "상속이 뭐야?"
+  },
+  {
+    "id": 2,
+    "sessionId": 5,
+    "role": "ASSISTANT",
+    "content": "...",
+    "sourceReferences": "testpdf.pdf [chunk 0]"
+  }
+]
+```
 
-## 현재 한계
+## 빠른 데모 요약
 
-교수님께 설명할 때 아래는 정직하게 말하는 편이 낫다.
+1. 서버 실행
 
-- 현재는 업로드된 전체 문서 풀에서 검색한다.
-- 즉, 방금 업로드한 PDF만 강제로 제한하는 문서 필터는 아직 없다.
-- 벡터 저장은 영속 벡터 DB가 아니라 메모리 기반이다.
-- 자동 문제 생성은 아직 `/api/problems` 직접 생성과 `rag/generate-questions` 수준으로 분리되어 있다.
-- 채점 로직은 문자열 동일성 기반이라 단순하다.
+```powershell
+$env:OLLAMA_ENABLED = "true"
+$env:OLLAMA_CHAT_MODEL = "qwen2.5:3b"
+.\gradlew.bat bootRun
+```
 
-권장 표현:
+2. 브라우저에서 열기
 
-`현재는 MVP 단계라 문서 업로드, 문서 기반 검색, 질문 생성, 튜터 응답 저장까지 구현했고, 다음 단계는 문서별 필터링과 검색 고도화입니다.`
+```text
+http://localhost:8080/index.html
+```
 
-## 시연 중 자주 생기는 문제
+3. 화면에서 순서대로 실행
 
-### 1. `Port 8080 already in use`
+- API 연결 확인
+- 사용자 생성
+- 학습 메모 저장
+- PDF 업로드
+- 문제 생성
+- 생성된 문제 풀이
+- 세션 생성
+- 튜터 질문
+- 채팅 메시지 조회
 
-이미 서버가 떠 있는 상태다.
+## 교수님께 설명할 때 좋은 문장
 
-해결:
+짧게 설명:
+
+`사용자가 PDF를 업로드하면 서버가 텍스트를 추출하고, 그 문서를 근거로 문제 생성과 튜터 답변을 수행합니다. 생성된 문제는 브라우저에서 바로 풀어볼 수 있고, 질문과 답변은 채팅 세션 단위로 저장되며 문서 근거도 함께 남습니다.`
+
+조금 더 구체적으로 설명:
+
+`현재 구현은 PDF 업로드, 문서 텍스트 추출, 문서 기반 질의응답, 문서 기반 문제 생성, 채팅 세션 저장, 튜터 응답 생성까지 이어지는 구조입니다. 문제 생성은 mixed, 객관식, OX, 주관식 타입을 지원하고, 프론트엔드에서 업로드한 문서를 자동으로 이어받아 바로 문제를 풀고 튜터 질문까지 진행할 수 있습니다.`
+
+## 자주 생기는 문제
+
+### 1. `Port 8080 was already in use`
+
+기존 서버가 이미 떠 있는 상태입니다.
 
 ```powershell
 Get-NetTCPConnection -LocalPort 8080 -State Listen
 Stop-Process -Id <PID>
 ```
 
-### 2. PowerShell에서 한글 JSON 전송 시 깨짐
+### 2. `curl: (3) URL rejected: No host part in the URL`
 
-`Invoke-RestMethod` 대신 `curl.exe + json 파일` 사용.
+`$base` 변수가 설정되지 않은 상태입니다.
 
-### 3. 업로드는 됐는데 다른 PDF source도 같이 나옴
+```powershell
+$base = "http://localhost:8080"
+```
 
-현재 구조상 전체 문서에서 검색하기 때문이다.
+### 3. 브라우저에서 프론트 화면이 안 열림
 
-설명:
+먼저 아래 주소를 정확히 확인합니다.
 
-`현재는 전체 업로드 문서 집합을 대상으로 검색하고 있습니다. 다음 단계에서 문서별 필터링을 추가할 예정입니다.`
+```text
+http://localhost:8080/index.html
+```
 
-## 시연 후 정리 멘트
+여전히 안 열리면 서버 로그에 `Adding welcome page: class path resource [static/index.html]` 가 보이는지 확인합니다.
 
-`현재 구현은 AI 튜터 백엔드의 기본 골격을 넘어서, 문서 업로드, RAG 검색, 질문 생성, 튜터 응답, 대화 저장까지 연결된 상태입니다. 남은 과제는 검색 정확도와 문서별 필터링, 문제 생성/채점 고도화입니다.`
+### 4. 404 또는 엉뚱한 세션/문서로 테스트됨
+
+예전 예시 숫자를 그대로 넣은 경우입니다.
+
+해결:
+
+- 사용자 생성 응답에서 `id` 확인
+- 업로드 응답에서 `documentId` 확인
+- 세션 생성 응답에서 `id` 확인
+- 다음 요청에 그 값을 그대로 사용
+
+### 5. `generate-questions` 가 오래 걸림
+
+로컬 LLM이 문제를 생성하는 중일 수 있습니다.
+
+```powershell
+C:\Users\USER\AppData\Local\Programs\Ollama\ollama.exe ps
+```
+
+참고:
+
+- `qwen2.5:3b` 는 `7b` 보다 가볍습니다.
+- 그래도 로컬 환경에서는 수 초에서 수십 초 걸릴 수 있습니다.
+
+## 종료 순서
+
+1. 테스트용 PowerShell 창 정리
+
+- `curl.exe` 를 실행하던 창은 닫아도 됩니다.
+- 필요 없으면 `user.json`, `session.json`, `ask.json` 도 지워도 됩니다.
+
+2. 서버 실행 창으로 돌아가기
+
+```powershell
+Ctrl + C
+```
+
+3. 포트가 남아 있는지 확인
+
+```powershell
+Get-NetTCPConnection -LocalPort 8080 -State Listen
+```
+
+아직 남아 있으면:
+
+```powershell
+Stop-Process -Id <PID>
+```

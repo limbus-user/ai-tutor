@@ -35,6 +35,10 @@ public class ChatSession {
     @Column(nullable = false)
     private SessionStatus status;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private SessionType type;
+
     @Column(nullable = false)
     private LocalDateTime createdAt;
 
@@ -42,9 +46,14 @@ public class ChatSession {
     private LocalDateTime updatedAt;
 
     public ChatSession(User user, String title) {
+        this(user, title, SessionType.STUDY);
+    }
+
+    public ChatSession(User user, String title, SessionType type) {
         this.user = user;
         this.title = title;
         this.status = SessionStatus.ACTIVE;
+        this.type = type == null ? SessionType.STUDY : type;
         this.createdAt = LocalDateTime.now();
         this.updatedAt = LocalDateTime.now();
     }
@@ -60,5 +69,9 @@ public class ChatSession {
 
     public enum SessionStatus {
         ACTIVE, CLOSED
+    }
+
+    public enum SessionType {
+        STUDY, QUIZ
     }
 }

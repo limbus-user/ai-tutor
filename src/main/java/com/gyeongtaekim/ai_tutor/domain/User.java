@@ -38,6 +38,10 @@ public class User {
         this.role = Role.USER;
     }
 
+    public void promoteToAdmin() {
+        this.role = Role.ADMIN;
+    }
+
     public enum Role {
         USER, ADMIN
     }

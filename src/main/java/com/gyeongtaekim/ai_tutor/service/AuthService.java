@@ -33,7 +33,7 @@ public class AuthService {
         userRepository.save(user);
         String token = jwtTokenProvider.generateToken(user.getEmail());
 
-        return new AuthResponse(token, user.getEmail(), user.getName());
+        return new AuthResponse(user.getId(), token, user.getEmail(), user.getName(), user.getRole().name());
     }
 
     // 로그인
@@ -47,6 +47,6 @@ public class AuthService {
         }
 
         String token = jwtTokenProvider.generateToken(user.getEmail());
-        return new AuthResponse(token, user.getEmail(), user.getName());
+        return new AuthResponse(user.getId(), token, user.getEmail(), user.getName(), user.getRole().name());
     }
 }

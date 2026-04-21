@@ -9,10 +9,12 @@ import com.gyeongtaekim.ai_tutor.dto.ChatSessionCreateRequest;
 import com.gyeongtaekim.ai_tutor.dto.ChatSessionResponse;
 import com.gyeongtaekim.ai_tutor.repository.ChatMessageRepository;
 import com.gyeongtaekim.ai_tutor.repository.ChatSessionRepository;
+import com.gyeongtaekim.ai_tutor.repository.SessionQuizRepository;
 import com.gyeongtaekim.ai_tutor.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
@@ -24,6 +26,7 @@ public class ChatService {
 
     private final ChatSessionRepository chatSessionRepository;
     private final ChatMessageRepository chatMessageRepository;
+    private final SessionQuizRepository sessionQuizRepository;
     private final UserRepository userRepository;
 
     public ChatSessionResponse createSession(ChatSessionCreateRequest request) {
@@ -34,7 +37,8 @@ public class ChatService {
                 ? "New Chat Session"
                 : request.getTitle().trim();
 
-        return new ChatSessionResponse(chatSessionRepository.save(new ChatSession(user, title)));
+        ChatSession.SessionType type = parseSessionType(request.getType());
+        return new ChatSessionResponse(chatSessionRepository.save(new ChatSession(user, title, type)));
     }
 
     public List<ChatSessionResponse> getSessions(Long userId) {
@@ -69,8 +73,28 @@ public class ChatService {
         return new ChatSessionResponse(chatSessionRepository.save(session));
     }
 
+    @Transactional
+    public void deleteSession(Long sessionId) {
+        findSession(sessionId);
+        chatMessageRepository.deleteAllBySessionId(sessionId);
+        sessionQuizRepository.deleteAllBySessionId(sessionId);
+        chatSessionRepository.deleteById(sessionId);
+    }
+
     private ChatSession findSession(Long sessionId) {
         return chatSessionRepository.findById(sessionId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Chat session not found"));
+    }
+
+    private ChatSession.SessionType parseSessionType(String rawType) {
+        if (rawType == null || rawType.isBlank()) {
+            return ChatSession.SessionType.STUDY;
+        }
+
+        try {
+            return ChatSession.SessionType.valueOf(rawType.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid session type");
+        }
     }
 }

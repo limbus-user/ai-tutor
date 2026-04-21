@@ -10,6 +10,29 @@ This repository is evolving from a backend skeleton into a `RAG-based AI tutor` 
 
 This file is a practical handoff for the next agent so work can continue without re-discovering the current state.
 
+## Latest Updates
+
+Recent work after the earlier handoff:
+
+- added a browser demo frontend at `/index.html`
+- frontend now hides internal `documentId` from the user and keeps it in client state
+- generated questions can now be solved directly in the frontend UI
+- RAG retrieval was upgraded from simple embedding-or-keyword fallback to a hybrid scoring approach
+- representative chunks are selected before question generation to improve grounding quality
+- `ox` question generation was added and fixed so `type=ox` no longer leaks `short_answer` fallback items
+- professor demo guide was updated to match the current UI-based demo flow
+
+Current demo flow in browser:
+
+1. create user
+2. save learning memory
+3. upload PDF
+4. generate questions
+5. solve generated questions in UI
+6. create chat session
+7. ask tutor question
+8. inspect persisted chat messages
+
 ## What Has Been Implemented
 
 ### 1. Auth and user foundation
@@ -133,21 +156,24 @@ Current behavior:
 - PDF upload stores file on disk
 - extracted text is stored in `RagDocument`
 - chunks are stored in `DocumentChunk`
-- retrieval first tries embedding search if `OPENAI_API_KEY` is present
-- if embeddings are unavailable, it falls back to keyword-based matching
+- retrieval uses in-memory embeddings if `OPENAI_API_KEY` is present
+- lexical scoring is still used alongside concept/sentence scoring as a hybrid retrieval fallback path
+- selected chunks are diversified to reduce near-duplicate evidence
+- question generation first selects representative chunks instead of using the whole document uniformly
 
 Important implementation detail:
 
 - embeddings are stored in `InMemoryEmbeddingStore`, not a persistent vector DB
 - chunk metadata is persisted, but vector data is not
 - after restart, the service rebuilds the in-memory store from persisted chunks when needed
+- `pgvector` is still not integrated yet
 
 Key files:
 
-- [RagDocument.java](/C:/Users/AI2-28/IdeaProjects/ai-tutor/src/main/java/com/gyeongtaekim/ai_tutor/domain/RagDocument.java)
-- [DocumentChunk.java](/C:/Users/AI2-28/IdeaProjects/ai-tutor/src/main/java/com/gyeongtaekim/ai_tutor/domain/DocumentChunk.java)
-- [RagService.java](/C:/Users/AI2-28/IdeaProjects/ai-tutor/src/main/java/com/gyeongtaekim/ai_tutor/service/RagService.java)
-- [RagController.java](/C:/Users/AI2-28/IdeaProjects/ai-tutor/src/main/java/com/gyeongtaekim/ai_tutor/controller/RagController.java)
+- [RagDocument.java](/C:/Users/USER/Desktop/ai-tutor/src/main/java/com/gyeongtaekim/ai_tutor/domain/RagDocument.java)
+- [DocumentChunk.java](/C:/Users/USER/Desktop/ai-tutor/src/main/java/com/gyeongtaekim/ai_tutor/domain/DocumentChunk.java)
+- [RagService.java](/C:/Users/USER/Desktop/ai-tutor/src/main/java/com/gyeongtaekim/ai_tutor/service/RagService.java)
+- [RagController.java](/C:/Users/USER/Desktop/ai-tutor/src/main/java/com/gyeongtaekim/ai_tutor/controller/RagController.java)
 
 ### 6. Grounded tutor flow
 
@@ -166,10 +192,32 @@ Current behavior:
 
 Key files:
 
-- [TutorController.java](/C:/Users/AI2-28/IdeaProjects/ai-tutor/src/main/java/com/gyeongtaekim/ai_tutor/controller/TutorController.java)
-- [TutorService.java](/C:/Users/AI2-28/IdeaProjects/ai-tutor/src/main/java/com/gyeongtaekim/ai_tutor/service/TutorService.java)
+- [TutorController.java](/C:/Users/USER/Desktop/ai-tutor/src/main/java/com/gyeongtaekim/ai_tutor/controller/TutorController.java)
+- [TutorService.java](/C:/Users/USER/Desktop/ai-tutor/src/main/java/com/gyeongtaekim/ai_tutor/service/TutorService.java)
 
-### 7. Verification and automated tests
+### 7. Frontend demo page
+
+Added:
+
+- `src/main/resources/static/index.html`
+- `src/main/resources/static/app.js`
+- `src/main/resources/static/app.css`
+
+Current behavior:
+
+- UI calls the real backend APIs directly
+- user/session/document IDs are automatically threaded through the flow
+- users do not manually enter `documentId`
+- generated `multiple_choice`, `ox`, and `short_answer` items can be solved directly in the browser
+- answer checking for generated questions is currently client-side only
+
+Key files:
+
+- [index.html](/C:/Users/USER/Desktop/ai-tutor/src/main/resources/static/index.html)
+- [app.js](/C:/Users/USER/Desktop/ai-tutor/src/main/resources/static/app.js)
+- [app.css](/C:/Users/USER/Desktop/ai-tutor/src/main/resources/static/app.css)
+
+### 8. Verification and automated tests
 
 Recent verification work confirmed that the main backend flow is wired end-to-end:
 
@@ -194,12 +242,14 @@ Automated backend tests were also added:
 - integration tests for auth
 - integration tests for wrong-answer review creation
 - integration tests for PDF upload -> RAG query -> tutor ask -> chat message persistence
+- static frontend page serving check
+- `ox` generation regression checks
 
 Key files:
 
-- [AiTutorIntegrationTest.java](/C:/Users/AI2-28/IdeaProjects/ai-tutor/src/test/java/com/gyeongtaekim/ai_tutor/AiTutorIntegrationTest.java)
-- [application-test.properties](/C:/Users/AI2-28/IdeaProjects/ai-tutor/src/test/resources/application-test.properties)
-- [build.gradle](/C:/Users/AI2-28/IdeaProjects/ai-tutor/build.gradle)
+- [AiTutorIntegrationTest.java](/C:/Users/USER/Desktop/ai-tutor/src/test/java/com/gyeongtaekim/ai_tutor/AiTutorIntegrationTest.java)
+- [application-test.properties](/C:/Users/USER/Desktop/ai-tutor/src/test/resources/application-test.properties)
+- [build.gradle](/C:/Users/USER/Desktop/ai-tutor/build.gradle)
 
 ## Runtime Requirements
 
@@ -231,7 +281,7 @@ set OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 
 Relevant properties:
 
-- [application.properties](/C:/Users/AI2-28/IdeaProjects/ai-tutor/src/main/resources/application.properties)
+- [application.properties](/C:/Users/USER/Desktop/ai-tutor/src/main/resources/application.properties)
 
 ## Important Caveats
 
@@ -241,8 +291,8 @@ Even after recent improvements, retrieval is still transitional:
 
 - embeddings are not persisted
 - no `pgvector`
-- no reranking
-- no hybrid retrieval policy
+- no persistent vector search
+- hybrid retrieval exists but is still heuristic and not benchmarked
 - no source confidence scoring
 
 ### 2. Tutor answer quality is still prompt-based
@@ -257,6 +307,12 @@ The tutor flow is now structurally correct, but:
 ### 3. Problem grading is naive
 
 `ProblemService` currently uses direct normalized string equality. That is acceptable for scaffolding only.
+
+Also note:
+
+- generated questions solved in the browser are not yet persisted as `Problem` / `UserProblemAttempt`
+- browser quiz grading is client-side only
+- if the user wants generated-question solving to feed the review pipeline, that still needs backend work
 
 ### 4. Legacy session features still exist
 
@@ -331,8 +387,9 @@ If continuing immediately, do this next:
 3. Update `RagService.query()` to retrieve from persistent vectors
 4. Keep keyword retrieval as a fallback only
 5. Add document-level filtering so retrieval can be constrained to a specific uploaded file or subject/unit
-6. Then test the full flow:
-   `rag upload -> tutor ask -> grounded answer -> source verification`
+6. After that, connect generated-question solving in the frontend to persisted backend attempts
+7. Then test the full flow:
+   `rag upload -> question generation -> solve question -> tutor ask -> grounded answer -> source verification`
 
 ## Verification Status
 
@@ -348,8 +405,8 @@ Verification status:
 
 - compile passed
 - build passed
-- integration tests passed (`AiTutorIntegrationTest`: 3 tests, 0 failures)
-- manual API checks also covered signup, problem submission, review queue creation, PDF upload, RAG query, tutor ask, and chat persistence
+- integration tests passed
+- manual checks covered frontend page serving, PDF upload, question generation, tutor ask, and chat persistence
 
 Known behavior observed during verification:
 

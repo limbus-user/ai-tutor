@@ -10,6 +10,7 @@ import com.gyeongtaekim.ai_tutor.repository.LearningMemoryRepository;
 import com.gyeongtaekim.ai_tutor.repository.ProblemRepository;
 import com.gyeongtaekim.ai_tutor.repository.RagDocumentRepository;
 import com.gyeongtaekim.ai_tutor.repository.ReviewQueueRepository;
+import com.gyeongtaekim.ai_tutor.repository.SessionQuizRepository;
 import com.gyeongtaekim.ai_tutor.repository.UserProblemAttemptRepository;
 import com.gyeongtaekim.ai_tutor.repository.UserRepository;
 import com.gyeongtaekim.ai_tutor.repository.WrongAnswerNoteRepository;
@@ -40,6 +41,7 @@ import java.nio.file.Path;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -103,11 +105,15 @@ class AiTutorIntegrationTest {
     private RagDocumentRepository ragDocumentRepository;
 
     @Autowired
+    private SessionQuizRepository sessionQuizRepository;
+
+    @Autowired
     private UserRepository userRepository;
 
     @BeforeEach
     void setUp() throws IOException {
         chatMessageRepository.deleteAll();
+        sessionQuizRepository.deleteAll();
         chatSessionRepository.deleteAll();
         reviewQueueRepository.deleteAll();
         wrongAnswerNoteRepository.deleteAll();
@@ -143,6 +149,7 @@ class AiTutorIntegrationTest {
                                 }
                                 """))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").isNumber())
                 .andExpect(jsonPath("$.token").isNotEmpty())
                 .andExpect(jsonPath("$.email").value("auth@example.com"))
                 .andExpect(jsonPath("$.name").value("Auth User"));
@@ -156,8 +163,17 @@ class AiTutorIntegrationTest {
                                 }
                                 """))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").isNumber())
                 .andExpect(jsonPath("$.token").isNotEmpty())
                 .andExpect(jsonPath("$.email").value("auth@example.com"));
+    }
+
+    @Test
+    void frontendIndexPageIsServed() throws Exception {
+        mockMvc.perform(get("/index.html"))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content()
+                        .string(org.hamcrest.Matchers.containsString("AI Tutor")));
     }
 
     @Test
@@ -168,7 +184,7 @@ class AiTutorIntegrationTest {
 
         mockMvc.perform(post("/api/problems/{problemId}/submit", problemId)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
+                .content("""
                                 {
                                   "userId": %d,
                                   "submittedAnswer":"O(n)"
@@ -177,7 +193,9 @@ class AiTutorIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.problemId").value(problemId))
                 .andExpect(jsonPath("$.userId").value(userId))
-                .andExpect(jsonPath("$.correct").value(false));
+                .andExpect(jsonPath("$.correct").value(false))
+                .andExpect(jsonPath("$.correctAnswer").value("O(log n)"))
+                .andExpect(jsonPath("$.explanation").value("The search interval is halved each step."));
 
         mockMvc.perform(get("/api/reviews/wrong-answers/{userId}", userId))
                 .andExpect(status().isOk())
@@ -191,6 +209,55 @@ class AiTutorIntegrationTest {
                 .andExpect(jsonPath("$[0].userId").value(userId))
                 .andExpect(jsonPath("$[0].status").value("PENDING"))
                 .andExpect(jsonPath("$[0].referenceName").value("What is the time complexity of binary search?"));
+    }
+
+    @Test
+    void problemLookupDoesNotExposeAnswerBeforeSubmission() throws Exception {
+        long conceptId = createConcept();
+        long problemId = createProblem(conceptId);
+
+        mockMvc.perform(get("/api/problems/{problemId}", problemId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(problemId))
+                .andExpect(jsonPath("$.questionText").value("What is the time complexity of binary search?"))
+                .andExpect(jsonPath("$.answer").doesNotExist())
+                .andExpect(jsonPath("$.explanation").doesNotExist());
+    }
+
+    @Test
+    void oxProblemCanBeCreatedAndSubmittedWithOxAlias() throws Exception {
+        long userId = createUser("ox@example.com");
+        long conceptId = createConcept();
+
+        MvcResult createResult = mockMvc.perform(post("/api/problems")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "questionText":"Binary search works on a sorted array. O/X",
+                                  "answer":"O",
+                                  "explanation":"Binary search requires the input to be sorted.",
+                                  "difficulty":"easy",
+                                  "type":"ox",
+                                  "conceptIds":[%d]
+                                }
+                                """.formatted(conceptId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.type").value("TRUE_FALSE"))
+                .andReturn();
+
+        long problemId = readId(createResult);
+
+        mockMvc.perform(post("/api/problems/{problemId}/submit", problemId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "userId": %d,
+                                  "submittedAnswer":"O"
+                                }
+                                """.formatted(userId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.correct").value(true))
+                .andExpect(jsonPath("$.correctAnswer").value("O"));
     }
 
     @Test
@@ -221,13 +288,83 @@ class AiTutorIntegrationTest {
                         """)
         );
 
-        mockMvc.perform(multipart("/api/rag/upload")
+        MvcResult uploadResult = mockMvc.perform(multipart("/api/rag/upload")
                         .file(file)
                         .param("subject", "computer-science")
                         .param("unitName", "algorithm")
                         .param("trustLevel", "high"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.chunkCount").value(1));
+                .andExpect(jsonPath("$.chunkCount").value(1))
+                .andReturn();
+
+        long documentId = objectMapper.readTree(uploadResult.getResponse().getContentAsByteArray()).get("documentId").asLong();
+
+        MvcResult generatedQuestionsResult = mockMvc.perform(post("/api/rag/generate-questions")
+                        .param("documentId", String.valueOf(documentId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.documentId").value(documentId))
+                .andExpect(jsonPath("$.questions.length()").value(5))
+                .andExpect(jsonPath("$.questions[0].question").isNotEmpty())
+                .andExpect(jsonPath("$.questions[0].type").isNotEmpty())
+                .andExpect(jsonPath("$.questions[0].correctAnswer").isNotEmpty())
+                .andExpect(jsonPath("$.questions[0].modelAnswer").isNotEmpty())
+                .andExpect(jsonPath("$.questions[0].explanation").isNotEmpty())
+                .andReturn();
+
+        JsonNode generatedQuestions = objectMapper.readTree(generatedQuestionsResult.getResponse().getContentAsByteArray());
+
+        mockMvc.perform(post("/api/chat/sessions/{sessionId}/quizzes", sessionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "documentId": %d,
+                                  "questions": %s
+                                }
+                                """.formatted(documentId, generatedQuestions.get("questions").toString())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].sessionId").value(sessionId))
+                .andExpect(jsonPath("$[0].documentId").value(documentId))
+                .andExpect(jsonPath("$[0].question").isNotEmpty());
+
+        mockMvc.perform(get("/api/chat/sessions/{sessionId}/quizzes", sessionId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(5))
+                .andExpect(jsonPath("$[0].documentId").value(documentId))
+                .andExpect(jsonPath("$[0].correctAnswer").isNotEmpty());
+
+        mockMvc.perform(post("/api/rag/generate-questions")
+                        .param("documentId", String.valueOf(documentId))
+                        .param("type", "mixed")
+                        .param("count", "3"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.questions.length()").value(3))
+                .andExpect(jsonPath("$.questions[0].type").value("multiple_choice"))
+                .andExpect(jsonPath("$.questions[1].type").value("ox"))
+                .andExpect(jsonPath("$.questions[2].type").value("short_answer"));
+
+        mockMvc.perform(post("/api/rag/generate-questions")
+                        .param("documentId", String.valueOf(documentId))
+                        .param("type", "multiple_choice")
+                        .param("count", "3"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.questions.length()").value(3))
+                .andExpect(jsonPath("$.questions[0].type").value("multiple_choice"))
+                .andExpect(jsonPath("$.questions[0].choices.length()").value(4))
+                .andExpect(jsonPath("$.questions[0].correctAnswer").isNotEmpty());
+
+        mockMvc.perform(post("/api/rag/generate-questions")
+                        .param("documentId", String.valueOf(documentId))
+                        .param("type", "ox")
+                        .param("count", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.questions.length()").value(2))
+                .andExpect(jsonPath("$.questions[0].type").value("ox"))
+                .andExpect(jsonPath("$.questions[0].choices[0]").value("O"))
+                .andExpect(jsonPath("$.questions[0].choices[1]").value("X"))
+                .andExpect(jsonPath("$.questions[0].correctAnswer").isNotEmpty())
+                .andExpect(jsonPath("$.questions[1].type").value("ox"))
+                .andExpect(jsonPath("$.questions[1].choices[0]").value("O"))
+                .andExpect(jsonPath("$.questions[1].choices[1]").value("X"));
 
         mockMvc.perform(post("/api/rag/query")
                         .contentType(MediaType.TEXT_PLAIN)
@@ -257,6 +394,163 @@ class AiTutorIntegrationTest {
 
         JsonNode messages = objectMapper.readTree(result.getResponse().getContentAsByteArray());
         assertThat(messages.get(1).get("sourceReferences").asText()).contains("binary-search.pdf [chunk 0]");
+    }
+
+    @Test
+    void tutorAskCanBeScopedToUploadedDocument() throws Exception {
+        long userId = createUser("scope@example.com");
+        long sessionId = createSession(userId);
+
+        MockMultipartFile firstFile = new MockMultipartFile(
+                "file",
+                "java.pdf",
+                "application/pdf",
+                createPdf("Java uses classes and objects.")
+        );
+        MockMultipartFile secondFile = new MockMultipartFile(
+                "file",
+                "python.pdf",
+                "application/pdf",
+                createPdf("Python uses indentation to define blocks.")
+        );
+
+        MvcResult firstUpload = mockMvc.perform(multipart("/api/rag/upload")
+                        .file(firstFile)
+                        .param("subject", "computer-science")
+                        .param("unitName", "java")
+                        .param("trustLevel", "high"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        mockMvc.perform(multipart("/api/rag/upload")
+                        .file(secondFile)
+                        .param("subject", "computer-science")
+                        .param("unitName", "python")
+                        .param("trustLevel", "high"))
+                .andExpect(status().isOk());
+
+        long firstDocumentId = objectMapper.readTree(firstUpload.getResponse().getContentAsByteArray()).get("documentId").asLong();
+
+        mockMvc.perform(post("/api/tutor/sessions/{sessionId}/ask", sessionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "question":"Explain classes and objects simply.",
+                                  "documentId": %d
+                                }
+                                """.formatted(firstDocumentId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sources[0]").value("java.pdf [chunk 0]"))
+                .andExpect(jsonPath("$.answer").value(org.hamcrest.Matchers.containsString("classes and objects")))
+                .andExpect(jsonPath("$.answer").value(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("indentation"))));
+    }
+
+    @Test
+    void tutorAskAnswersKoreanConceptQuestionFromUploadedPdf() throws Exception {
+        long userId = createUser("korean@example.com");
+        long sessionId = createSession(userId);
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "oop.pdf",
+                "application/pdf",
+                Files.readAllBytes(Path.of(System.getProperty("user.dir"), "sample-upload-test-ko-cs.pdf"))
+        );
+
+        MvcResult uploadResult = mockMvc.perform(multipart("/api/rag/upload")
+                        .file(file)
+                        .param("subject", "computer-science")
+                        .param("unitName", "oop")
+                        .param("trustLevel", "high"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        long documentId = objectMapper.readTree(uploadResult.getResponse().getContentAsByteArray()).get("documentId").asLong();
+
+        mockMvc.perform(post("/api/rag/generate-questions")
+                        .param("documentId", String.valueOf(documentId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.questions.length()").value(5))
+                .andExpect(jsonPath("$.questions[0].question").isNotEmpty())
+                .andExpect(jsonPath("$.questions[0].modelAnswer").isNotEmpty())
+                .andExpect(jsonPath("$.questions[0].explanation").isNotEmpty());
+
+        mockMvc.perform(post("/api/tutor/sessions/{sessionId}/ask", sessionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                                {
+                                  "question":"다형성이 뭐야?",
+                                  "documentId": %d
+                                }
+                                """.formatted(documentId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sources").isArray())
+                .andExpect(jsonPath("$.answer").isNotEmpty());
+    }
+
+    @Test
+    void deletingSessionRemovesMessagesAndQuizzes() throws Exception {
+        long userId = createUser("delete-session@example.com");
+        long sessionId = createSession(userId);
+
+        mockMvc.perform(post("/api/chat/sessions/{sessionId}/messages", sessionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "role":"USER",
+                                  "content":"delete me",
+                                  "sourceReferences":""
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "delete-session.pdf",
+                "application/pdf",
+                createPdf("Deletion test content.")
+        );
+
+        MvcResult uploadResult = mockMvc.perform(multipart("/api/rag/upload")
+                        .file(file)
+                        .param("subject", "computer-science")
+                        .param("unitName", "cleanup")
+                        .param("trustLevel", "high"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        long documentId = objectMapper.readTree(uploadResult.getResponse().getContentAsByteArray()).get("documentId").asLong();
+
+        mockMvc.perform(post("/api/chat/sessions/{sessionId}/quizzes", sessionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "documentId": %d,
+                                  "quizSetTitle": "Delete Set",
+                                  "questions": [
+                                    {
+                                      "order": 1,
+                                      "type": "ox",
+                                      "question": "Deletion test question",
+                                      "choices": ["O", "X"],
+                                      "correctAnswer": "O",
+                                      "modelAnswer": "O",
+                                      "explanation": "It should delete cleanly.",
+                                      "sourceEvidence": "delete-session.pdf [chunk 0]",
+                                      "difficulty": "easy"
+                                    }
+                                  ]
+                                }
+                                """.formatted(documentId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].sessionId").value(sessionId));
+
+        mockMvc.perform(delete("/api/chat/sessions/{sessionId}", sessionId))
+                .andExpect(status().isNoContent());
+
+        assertThat(chatSessionRepository.findById(sessionId)).isEmpty();
+        assertThat(chatMessageRepository.findBySessionIdOrderByCreatedAtAsc(sessionId)).isEmpty();
+        assertThat(sessionQuizRepository.findBySessionIdOrderByCreatedAtAscQuestionOrderAsc(sessionId)).isEmpty();
     }
 
     private long createUser(String email) throws Exception {

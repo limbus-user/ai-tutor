@@ -13,6 +13,9 @@ public class ProblemSubmissionResponse {
     private final String submittedAnswer;
     private final boolean correct;
     private final String feedback;
+    private final String correctAnswer;
+    private final String explanation;
+    private final String nextAction;
     private final LocalDateTime submittedAt;
 
     public ProblemSubmissionResponse(UserProblemAttempt attempt) {
@@ -22,6 +25,11 @@ public class ProblemSubmissionResponse {
         this.submittedAnswer = attempt.getSubmittedAnswer();
         this.correct = attempt.isCorrect();
         this.feedback = attempt.getFeedback();
+        this.correctAnswer = attempt.getProblem().getAnswer();
+        this.explanation = attempt.getProblem().getExplanation();
+        this.nextAction = attempt.isCorrect()
+                ? "다음 문제로 넘어가세요."
+                : "오답노트에 저장되었어요. 해설을 읽고 다시 복습해 보세요.";
         this.submittedAt = attempt.getSubmittedAt();
     }
 }

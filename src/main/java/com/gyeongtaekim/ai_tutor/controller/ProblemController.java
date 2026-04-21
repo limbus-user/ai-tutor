@@ -4,6 +4,7 @@ import com.gyeongtaekim.ai_tutor.dto.ProblemCreateRequest;
 import com.gyeongtaekim.ai_tutor.dto.ProblemResponse;
 import com.gyeongtaekim.ai_tutor.dto.ProblemSubmissionRequest;
 import com.gyeongtaekim.ai_tutor.dto.ProblemSubmissionResponse;
+import com.gyeongtaekim.ai_tutor.dto.ProblemViewResponse;
 import com.gyeongtaekim.ai_tutor.service.ProblemService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -27,7 +28,7 @@ public class ProblemController {
     }
 
     @GetMapping("/{problemId}")
-    public ResponseEntity<ProblemResponse> getProblem(@PathVariable Long problemId) {
+    public ResponseEntity<ProblemViewResponse> getProblem(@PathVariable Long problemId) {
         return ResponseEntity.ok(problemService.getProblem(problemId));
     }
 
