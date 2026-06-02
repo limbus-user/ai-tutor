@@ -40,7 +40,7 @@ public class RagDocument {
     @Column(nullable = false, unique = true)
     private String storedFileName;
 
-    @Column(nullable = false, length = 4000)
+    @Column(nullable = false, columnDefinition = "TEXT")
     private String extractedText;
 
     @Column(nullable = false)

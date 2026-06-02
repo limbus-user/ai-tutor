@@ -13,6 +13,7 @@ public class ProblemResponse {
     private final String answer;
     private final String explanation;
     private final String difficulty;
+    private final String understandingLevel;
     private final String type;
     private final List<String> concepts;
 
@@ -22,6 +23,7 @@ public class ProblemResponse {
         this.answer = problem.getAnswer();
         this.explanation = problem.getExplanation();
         this.difficulty = problem.getDifficulty().name();
+        this.understandingLevel = problem.getUnderstandingLevel().name();
         this.type = problem.getType().name();
         this.concepts = problem.getConcepts().stream().map(Concept::getName).toList();
     }

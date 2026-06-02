@@ -11,6 +11,7 @@ public class ProblemViewResponse {
     private final Long id;
     private final String questionText;
     private final String difficulty;
+    private final String understandingLevel;
     private final String type;
     private final List<String> concepts;
 
@@ -18,6 +19,7 @@ public class ProblemViewResponse {
         this.id = problem.getId();
         this.questionText = problem.getQuestionText();
         this.difficulty = problem.getDifficulty().name();
+        this.understandingLevel = problem.getUnderstandingLevel().name();
         this.type = problem.getType().name();
         this.concepts = problem.getConcepts().stream().map(Concept::getName).toList();
     }

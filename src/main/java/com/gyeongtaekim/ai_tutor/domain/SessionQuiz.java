@@ -63,6 +63,31 @@ public class SessionQuiz {
     private String difficulty;
 
     @Column(nullable = false)
+    private String conceptTag;
+
+    @Column(nullable = false)
+    private String understandingLevel;
+
+    @Column(columnDefinition = "TEXT")
+    private String submittedAnswer;
+
+    private Boolean correct;
+
+    @Column(nullable = false, columnDefinition = "TEXT")
+    private String evaluationFeedback;
+
+    @Column(nullable = false)
+    private Integer attemptCount;
+
+    @Column(nullable = false)
+    private Integer resetCount;
+
+    @Column(nullable = false)
+    private Boolean solved;
+
+    private LocalDateTime lastSolvedAt;
+
+    @Column(nullable = false)
     private LocalDateTime createdAt;
 
     public SessionQuiz(
@@ -78,7 +103,9 @@ public class SessionQuiz {
             String modelAnswer,
             String explanation,
             String sourceEvidence,
-            String difficulty
+            String difficulty,
+            String conceptTag,
+            String understandingLevel
     ) {
         this.session = session;
         this.documentId = documentId;
@@ -93,10 +120,37 @@ public class SessionQuiz {
         this.explanation = explanation;
         this.sourceEvidence = sourceEvidence;
         this.difficulty = difficulty;
+        this.conceptTag = conceptTag;
+        this.understandingLevel = understandingLevel;
+        this.submittedAnswer = null;
+        this.correct = null;
+        this.evaluationFeedback = "";
+        this.attemptCount = 0;
+        this.resetCount = 0;
+        this.solved = false;
+        this.lastSolvedAt = null;
         this.createdAt = LocalDateTime.now();
     }
 
     public void updateQuizSetTitle(String quizSetTitle) {
         this.quizSetTitle = quizSetTitle;
+    }
+
+    public void submitResult(String submittedAnswer, boolean correct, String evaluationFeedback) {
+        this.submittedAnswer = submittedAnswer;
+        this.correct = correct;
+        this.evaluationFeedback = evaluationFeedback == null ? "" : evaluationFeedback;
+        this.attemptCount += 1;
+        this.solved = true;
+        this.lastSolvedAt = LocalDateTime.now();
+    }
+
+    public void resetProgress() {
+        this.submittedAnswer = null;
+        this.correct = null;
+        this.evaluationFeedback = "";
+        this.solved = false;
+        this.resetCount += 1;
+        this.lastSolvedAt = null;
     }
 }

@@ -11,6 +11,7 @@ import java.util.List;
 public interface SessionQuizRepository extends JpaRepository<SessionQuiz, Long> {
     List<SessionQuiz> findBySessionIdOrderByCreatedAtAscQuestionOrderAsc(Long sessionId);
     List<SessionQuiz> findBySessionIdAndQuizSetIdOrderByCreatedAtAscQuestionOrderAsc(Long sessionId, String quizSetId);
+    java.util.Optional<SessionQuiz> findByIdAndSessionId(Long id, Long sessionId);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("delete from SessionQuiz quiz where quiz.session.id = :sessionId")

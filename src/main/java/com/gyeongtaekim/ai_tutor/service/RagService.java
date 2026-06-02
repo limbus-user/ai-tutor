@@ -181,9 +181,25 @@ public class RagService {
     }
 
     public RagGeneratedQuestionsResponse generateQuestions(Long documentId, String fileName, String type, Integer count) {
+        return generateQuestions(documentId, List.of(), fileName, type, count);
+    }
+
+    public RagGeneratedQuestionsResponse generateQuestions(
+            Long documentId,
+            List<Long> documentIds,
+            String fileName,
+            String type,
+            Integer count
+    ) {
         String normalizedType = normalizeGenerationType(type);
         int normalizedCount = normalizeCount(count);
 
+        List<Long> selectedDocumentIds = documentIds == null
+                ? List.of()
+                : documentIds.stream().filter(java.util.Objects::nonNull).distinct().toList();
+        if (!selectedDocumentIds.isEmpty()) {
+            return generateQuestions(selectedDocumentIds, normalizedType, normalizedCount);
+        }
         if (documentId != null) {
             return generateQuestions(documentId, normalizedType, normalizedCount);
         }
@@ -253,6 +269,30 @@ public class RagService {
         return buildGeneratedQuestionsResponse(document, type, count);
     }
 
+    public RagGeneratedQuestionsResponse generateQuestions(List<Long> documentIds, String type, Integer count) {
+        if (documentIds == null || documentIds.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "documentIds are required");
+        }
+
+        Map<Long, RagDocument> documentsById = ragDocumentRepository.findAllById(documentIds).stream()
+                .collect(Collectors.toMap(RagDocument::getId, document -> document));
+        List<RagDocument> documents = documentIds.stream()
+                .distinct()
+                .map(documentId -> {
+                    RagDocument document = documentsById.get(documentId);
+                    if (document == null) {
+                        throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Document not found: " + documentId);
+                    }
+                    return document;
+                })
+                .toList();
+        List<DocumentChunk> chunks = documents.stream()
+                .flatMap(document -> documentChunkRepository.findByDocumentIdOrderByChunkIndexAsc(document.getId()).stream())
+                .toList();
+
+        return buildGeneratedQuestionsResponse(documents, chunks, type, count);
+    }
+
     private RagGeneratedQuestionsResponse buildGeneratedQuestionsResponse(RagDocument document) {
         List<DocumentChunk> chunks = documentChunkRepository.findByDocumentIdOrderByChunkIndexAsc(document.getId());
         List<DocumentChunk> representativeChunks = selectRepresentativeChunks(chunks, 6);
@@ -271,6 +311,15 @@ public class RagService {
 
     private RagGeneratedQuestionsResponse buildGeneratedQuestionsResponse(RagDocument document, String type, int count) {
         List<DocumentChunk> chunks = documentChunkRepository.findByDocumentIdOrderByChunkIndexAsc(document.getId());
+        return buildGeneratedQuestionsResponse(List.of(document), chunks, type, count);
+    }
+
+    private RagGeneratedQuestionsResponse buildGeneratedQuestionsResponse(
+            List<RagDocument> documents,
+            List<DocumentChunk> chunks,
+            String type,
+            int count
+    ) {
         List<DocumentChunk> representativeChunks = selectRepresentativeChunks(chunks, Math.max(count + 2, 4));
         String representativeText = representativeChunks.stream()
                 .map(DocumentChunk::getChunkText)
@@ -278,11 +327,12 @@ public class RagService {
         List<ConceptEvidence> conceptEvidence = extractConceptEvidence(representativeText, representativeChunks);
         List<String> evidenceSentences = collectEvidenceSentences(representativeText, representativeChunks);
         List<RagGeneratedQuestionResponse> questions = buildAdaptiveQuestionSet(representativeText, conceptEvidence, evidenceSentences, type, count);
+        RagDocument primaryDocument = documents.get(0);
 
         return new RagGeneratedQuestionsResponse(
-                document.getId(),
-                document.getTitle(),
-                document.getStoredFileName(),
+                primaryDocument.getId(),
+                documents.stream().map(RagDocument::getTitle).collect(Collectors.joining(", ")),
+                primaryDocument.getStoredFileName(),
                 questions
         );
     }
@@ -304,6 +354,12 @@ public class RagService {
         if (!llmQuestions.isEmpty()) {
             return llmQuestions;
         }
+        if (ollamaService.isEnabled()) {
+            throw new ResponseStatusException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "LLM question generation failed. Please check Ollama model response."
+            );
+        }
 
         List<RagGeneratedQuestionResponse> questions = new ArrayList<>();
         questions.add(new RagGeneratedQuestionResponse(
@@ -317,7 +373,7 @@ public class RagService {
         for (ConceptEvidence evidence : topConcepts) {
             questions.add(new RagGeneratedQuestionResponse(
                     questions.size() + 1,
-                    "'" + evidence.concept() + "'이(가) 무엇인지 쉽게 설명해 보세요.",
+                    "'" + evidence.concept() + "' 개념을 쉽게 설명해 보세요.",
                     evidence.explanation(),
                     "'" + evidence.concept() + "'의 정의와 역할을 직접 설명할 수 있어야 문서 내용을 이해했다고 볼 수 있습니다."
             ));
@@ -401,7 +457,7 @@ public class RagService {
 
         try {
             com.fasterxml.jackson.databind.JsonNode root =
-                    new com.fasterxml.jackson.databind.ObjectMapper().readTree(response);
+                    new com.fasterxml.jackson.databind.ObjectMapper().readTree(extractJsonObject(response));
             com.fasterxml.jackson.databind.JsonNode questionsNode = root.get("questions");
             if (questionsNode == null || !questionsNode.isArray()) {
                 return List.of();
@@ -454,7 +510,7 @@ public class RagService {
                 .sorted(Comparator.comparingInt((ConceptEvidence evidence) -> scoreConceptEvidence(tokens, evidence)).reversed())
                 .filter(evidence -> scoreConceptEvidence(tokens, evidence) > 0)
                 .limit(3)
-                .forEach(evidence -> answers.add(evidence.concept() + "은(는) " + evidence.explanation()));
+                .forEach(evidence -> answers.add(evidence.concept() + ": " + evidence.explanation()));
 
         if (!answers.isEmpty()) {
             return answers;
@@ -652,6 +708,7 @@ public class RagService {
         String cleaned = normalizeWhitespace(line);
         cleaned = BRACKET_HEADER.matcher(cleaned).replaceFirst("");
         cleaned = LEADING_NUMBER.matcher(cleaned).replaceFirst("");
+        cleaned = cleaned.replaceAll("^[Ÿ•·▪◦●○■□◆◇▶▷►※]+\\s*", "");
         cleaned = cleaned.replaceAll("^[-:]+\\s*", "");
         cleaned = cleaned.replaceAll("\\s+", " ").trim();
         return cleaned;
@@ -1039,6 +1096,12 @@ public class RagService {
         if (!llmQuestions.isEmpty()) {
             return llmQuestions;
         }
+        if (ollamaService.isEnabled()) {
+            throw new ResponseStatusException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "LLM question generation failed. Please check Ollama model response."
+            );
+        }
 
         List<RagGeneratedQuestionResponse> questions = new ArrayList<>();
         List<ConceptEvidence> pool = conceptEvidence.isEmpty()
@@ -1063,6 +1126,7 @@ public class RagService {
             questions.add(buildFallbackQuestion(questions.size() + 1, selectedType, fallback));
         }
 
+        ensureUnderstandingLevelCoverage(questions, type, count, pool);
         return questions;
     }
 
@@ -1118,15 +1182,19 @@ public class RagService {
                 You create Korean study questions from PDF evidence.
                 Return strict JSON only.
                 Each item type must be either multiple_choice, short_answer, or ox.
+                For ox, question must be a declarative true/false statement, not a "what is" or "explain" question.
                 For multiple_choice, include exactly 4 choices and set correctAnswer to the exact correct choice text.
                 For short_answer, choices must be an empty array.
                 For ox, choices must be exactly ["O","X"] and correctAnswer must be either O or X.
+                understandingLevel must be one of CONCEPT_UNDERSTANDING, CONCEPT_DISTINCTION, CONCEPT_APPLICATION.
+                If %d is 3 or more, include at least one question for each understandingLevel.
+                conceptTag should be the main concept the question is checking.
                 JSON shape:
-                {"questions":[{"type":"multiple_choice","question":"...","choices":["..."],"correctAnswer":"...","modelAnswer":"...","explanation":"...","sourceEvidence":"...","difficulty":"easy"}]}
+                {"questions":[{"type":"multiple_choice","question":"...","choices":["..."],"correctAnswer":"...","modelAnswer":"...","explanation":"...","sourceEvidence":"...","difficulty":"easy","conceptTag":"...","understandingLevel":"CONCEPT_DISTINCTION"}]}
                 Make exactly %d items.
                 Preferred mode: %s
                 Do not invent facts outside the evidence.
-                """.formatted(count, type),
+                """.formatted(count, count, type),
                 """
                 [Concept Evidence]
                 %s
@@ -1144,7 +1212,7 @@ public class RagService {
         }
 
         try {
-            com.fasterxml.jackson.databind.JsonNode root = new com.fasterxml.jackson.databind.ObjectMapper().readTree(response);
+            com.fasterxml.jackson.databind.JsonNode root = new com.fasterxml.jackson.databind.ObjectMapper().readTree(extractJsonObject(response));
             com.fasterxml.jackson.databind.JsonNode questionsNode = root.get("questions");
             if (questionsNode == null || !questionsNode.isArray()) {
                 return List.of();
@@ -1154,6 +1222,7 @@ public class RagService {
             int order = 1;
             for (com.fasterxml.jackson.databind.JsonNode node : questionsNode) {
                 RagGeneratedQuestionResponse question = toGeneratedQuestion(order++, node);
+                question = coerceQuestionType(question, type, conceptEvidence, evidenceSentences);
                 if (question != null && isValidQuestionType(question.getType(), type)) {
                     questions.add(question);
                 }
@@ -1161,14 +1230,374 @@ public class RagService {
                     break;
                 }
             }
-            return questions.size() == count ? questions : List.of();
+            fillMissingLlmQuestions(questions, type, count, conceptEvidence, evidenceSentences);
+            ensureUnderstandingLevelCoverage(questions, type, count, buildConceptPool(conceptEvidence, evidenceSentences, questions));
+            return questions.isEmpty() ? List.of() : questions;
         } catch (Exception e) {
             return List.of();
         }
     }
 
+    private void fillMissingLlmQuestions(
+            List<RagGeneratedQuestionResponse> questions,
+            String type,
+            int count,
+            List<ConceptEvidence> conceptEvidence,
+            List<String> evidenceSentences
+    ) {
+        if (questions.isEmpty()) {
+            return;
+        }
+        List<ConceptEvidence> pool = buildConceptPool(conceptEvidence, evidenceSentences, questions);
+
+        while (questions.size() < count) {
+            int index = questions.size();
+            String selectedType = selectQuestionType(type, index);
+            ConceptEvidence evidence = pool.isEmpty()
+                    ? new ConceptEvidence("핵심 개념", questions.get(0).getModelAnswer())
+                    : pool.get(index % pool.size());
+            if ("multiple_choice".equals(selectedType)) {
+                questions.add(buildMultipleChoiceQuestion(index + 1, evidence, pool));
+            } else if ("ox".equals(selectedType)) {
+                questions.add(buildOxQuestion(index + 1, evidence, pool));
+            } else {
+                questions.add(buildShortAnswerQuestion(index + 1, evidence));
+            }
+        }
+    }
+
+    private List<ConceptEvidence> buildConceptPool(
+            List<ConceptEvidence> conceptEvidence,
+            List<String> evidenceSentences,
+            List<RagGeneratedQuestionResponse> existingQuestions
+    ) {
+        List<ConceptEvidence> pool = conceptEvidence.isEmpty()
+                ? evidenceSentences.stream()
+                .map(sentence -> new ConceptEvidence(extractLeadingConcept(sentence), sentence))
+                .toList()
+                : conceptEvidence.stream().distinct().toList();
+        if (!pool.isEmpty()) {
+            return pool;
+        }
+        if (existingQuestions != null && !existingQuestions.isEmpty()) {
+            RagGeneratedQuestionResponse question = existingQuestions.get(0);
+            return List.of(new ConceptEvidence(question.getConceptTag(), question.getModelAnswer()));
+        }
+        return List.of(new ConceptEvidence("핵심 개념", "문서의 핵심 개념을 이해하고 구분한 뒤 상황에 적용할 수 있어야 합니다."));
+    }
+
+    private void ensureUnderstandingLevelCoverage(
+            List<RagGeneratedQuestionResponse> questions,
+            String requestedType,
+            int count,
+            List<ConceptEvidence> pool
+    ) {
+        if (count < 3) {
+            return;
+        }
+        List<String> requiredLevels = List.of(
+                "CONCEPT_UNDERSTANDING",
+                "CONCEPT_DISTINCTION",
+                "CONCEPT_APPLICATION"
+        );
+
+        for (int i = 0; i < requiredLevels.size(); i++) {
+            String level = requiredLevels.get(i);
+            if (questions.stream().anyMatch(question -> level.equals(question.getUnderstandingLevel()))) {
+                continue;
+            }
+
+            ConceptEvidence evidence = pool.get(i % pool.size());
+            RagGeneratedQuestionResponse coverageQuestion = buildCoverageQuestion(
+                    Math.min(i + 1, count),
+                    requestedType,
+                    level,
+                    evidence,
+                    pool
+            );
+
+            if (questions.size() < count) {
+                questions.add(coverageQuestion);
+            } else {
+                questions.set(findReplaceIndexForCoverage(questions, requiredLevels), coverageQuestion);
+            }
+        }
+
+        for (int i = 0; i < questions.size(); i++) {
+            RagGeneratedQuestionResponse question = questions.get(i);
+            if (!Integer.valueOf(i + 1).equals(question.getOrder())) {
+                questions.set(i, withOrder(question, i + 1));
+            }
+        }
+    }
+
+    private int findReplaceIndexForCoverage(List<RagGeneratedQuestionResponse> questions, List<String> requiredLevels) {
+        for (int i = questions.size() - 1; i >= 0; i--) {
+            String level = questions.get(i).getUnderstandingLevel();
+            long sameLevelCount = questions.stream()
+                    .filter(question -> level.equals(question.getUnderstandingLevel()))
+                    .count();
+            if (!requiredLevels.contains(level) || sameLevelCount > 1) {
+                return i;
+            }
+        }
+        return questions.size() - 1;
+    }
+
+    private RagGeneratedQuestionResponse buildCoverageQuestion(
+            int order,
+            String requestedType,
+            String understandingLevel,
+            ConceptEvidence evidence,
+            List<ConceptEvidence> pool
+    ) {
+        String selectedType = selectCoverageQuestionType(requestedType, understandingLevel);
+        RagGeneratedQuestionResponse base;
+        if ("CONCEPT_DISTINCTION".equals(understandingLevel)) {
+            base = "multiple_choice".equals(selectedType)
+                    ? buildMultipleChoiceQuestion(order, evidence, pool)
+                    : buildTypedCoverageQuestion(order, selectedType, evidence, understandingLevel);
+        } else if ("CONCEPT_APPLICATION".equals(understandingLevel)) {
+            base = buildApplicationQuestion(order, selectedType, evidence, pool);
+        } else {
+            if ("multiple_choice".equals(selectedType)) {
+                base = buildMultipleChoiceQuestion(order, evidence, pool);
+            } else if ("ox".equals(selectedType)) {
+                base = buildOxQuestion(order, evidence, pool);
+            } else {
+                base = buildShortAnswerQuestion(order, evidence);
+            }
+        }
+        return withUnderstandingLevel(base, understandingLevel);
+    }
+
+    private String selectCoverageQuestionType(String requestedType, String understandingLevel) {
+        if (!"mixed".equals(requestedType)) {
+            return requestedType;
+        }
+        if ("CONCEPT_DISTINCTION".equals(understandingLevel)) {
+            return "multiple_choice";
+        }
+        if ("CONCEPT_APPLICATION".equals(understandingLevel)) {
+            return "short_answer";
+        }
+        return "short_answer";
+    }
+
+    private RagGeneratedQuestionResponse buildTypedCoverageQuestion(
+            int order,
+            String selectedType,
+            ConceptEvidence evidence,
+            String understandingLevel
+    ) {
+        if ("ox".equals(selectedType)) {
+            return new RagGeneratedQuestionResponse(
+                    order,
+                    "ox",
+                    buildOxQuestionText("", evidence.explanation()),
+                    List.of("O", "X"),
+                    "O",
+                    evidence.explanation(),
+                    "문서의 설명과 일치하므로 O가 정답입니다.",
+                    evidence.explanation(),
+                    "medium",
+                    evidence.concept(),
+                    understandingLevel
+            );
+        }
+        return new RagGeneratedQuestionResponse(
+                order,
+                "short_answer",
+                evidence.concept() + " 개념을 다른 개념과 구분하는 핵심 기준을 설명하세요.",
+                List.of(),
+                evidence.explanation(),
+                evidence.explanation(),
+                "개념 구분 문제는 비슷한 개념 사이에서 이 개념의 특징을 식별하는지 확인합니다.",
+                evidence.explanation(),
+                "medium",
+                evidence.concept(),
+                understandingLevel
+        );
+    }
+
+    private RagGeneratedQuestionResponse buildApplicationQuestion(
+            int order,
+            String selectedType,
+            ConceptEvidence evidence,
+            List<ConceptEvidence> pool
+    ) {
+        if ("multiple_choice".equals(selectedType)) {
+            RagGeneratedQuestionResponse base = buildMultipleChoiceQuestion(order, evidence, pool);
+            return new RagGeneratedQuestionResponse(
+                    order,
+                    "multiple_choice",
+                    evidence.concept() + " 개념을 실제 상황에 적용한 설명으로 가장 알맞은 것은 무엇인가요?",
+                    base.getChoices(),
+                    base.getCorrectAnswer(),
+                    base.getModelAnswer(),
+                    "개념 적용 문제는 정의를 외우는 것이 아니라 상황에서 해당 개념을 사용할 수 있는지 확인합니다.",
+                    base.getSourceEvidence(),
+                    "medium",
+                    evidence.concept(),
+                    "CONCEPT_APPLICATION"
+            );
+        }
+        if ("ox".equals(selectedType)) {
+            return new RagGeneratedQuestionResponse(
+                    order,
+                    "ox",
+                    buildOxQuestionText("", evidence.explanation()),
+                    List.of("O", "X"),
+                    "O",
+                    evidence.explanation(),
+                    "문서 근거를 실제 상황에 연결한 설명이므로 O가 정답입니다.",
+                    evidence.explanation(),
+                    "medium",
+                    evidence.concept(),
+                    "CONCEPT_APPLICATION"
+            );
+        }
+        return new RagGeneratedQuestionResponse(
+                order,
+                "short_answer",
+                evidence.concept() + " 개념을 실제 예시나 상황에 어떻게 적용할 수 있는지 설명하세요.",
+                List.of(),
+                evidence.explanation(),
+                evidence.explanation(),
+                "개념 적용 문제는 문서의 설명을 새로운 상황에 연결해 설명할 수 있는지 확인합니다.",
+                evidence.explanation(),
+                "medium",
+                evidence.concept(),
+                "CONCEPT_APPLICATION"
+        );
+    }
+
+    private RagGeneratedQuestionResponse withUnderstandingLevel(RagGeneratedQuestionResponse question, String understandingLevel) {
+        return new RagGeneratedQuestionResponse(
+                question.getOrder(),
+                question.getType(),
+                question.getQuestion(),
+                question.getChoices(),
+                question.getCorrectAnswer(),
+                question.getModelAnswer(),
+                question.getExplanation(),
+                question.getSourceEvidence(),
+                question.getDifficulty(),
+                question.getConceptTag(),
+                understandingLevel
+        );
+    }
+
+    private RagGeneratedQuestionResponse withOrder(RagGeneratedQuestionResponse question, int order) {
+        return new RagGeneratedQuestionResponse(
+                order,
+                question.getType(),
+                question.getQuestion(),
+                question.getChoices(),
+                question.getCorrectAnswer(),
+                question.getModelAnswer(),
+                question.getExplanation(),
+                question.getSourceEvidence(),
+                question.getDifficulty(),
+                question.getConceptTag(),
+                question.getUnderstandingLevel()
+        );
+    }
+
+    private RagGeneratedQuestionResponse coerceQuestionType(
+            RagGeneratedQuestionResponse question,
+            String requestedType,
+            List<ConceptEvidence> conceptEvidence,
+            List<String> evidenceSentences
+    ) {
+        if (question == null || "mixed".equals(requestedType) || requestedType.equals(question.getType())) {
+            return question;
+        }
+        if ("multiple_choice".equals(requestedType)) {
+            return toMultipleChoiceFromLlmQuestion(question, conceptEvidence, evidenceSentences);
+        }
+        if ("ox".equals(requestedType)) {
+            String statement = selectOxStatementSource(question);
+            return new RagGeneratedQuestionResponse(
+                    question.getOrder(),
+                    "ox",
+                    buildOxQuestionText(question.getQuestion(), statement),
+                    List.of("O", "X"),
+                    "O",
+                    statement,
+                    question.getExplanation(),
+                    question.getSourceEvidence(),
+                    question.getDifficulty(),
+                    question.getConceptTag(),
+                    "CONCEPT_UNDERSTANDING"
+            );
+        }
+        if ("short_answer".equals(requestedType)) {
+            return new RagGeneratedQuestionResponse(
+                    question.getOrder(),
+                    "short_answer",
+                    question.getQuestion(),
+                    List.of(),
+                    question.getModelAnswer(),
+                    question.getModelAnswer(),
+                    question.getExplanation(),
+                    question.getSourceEvidence(),
+                    question.getDifficulty(),
+                    question.getConceptTag(),
+                    question.getUnderstandingLevel()
+            );
+        }
+        return question;
+    }
+
+    private RagGeneratedQuestionResponse toMultipleChoiceFromLlmQuestion(
+            RagGeneratedQuestionResponse question,
+            List<ConceptEvidence> conceptEvidence,
+            List<String> evidenceSentences
+    ) {
+        String answer = normalizeWhitespace(question.getCorrectAnswer().isBlank()
+                ? question.getModelAnswer()
+                : question.getCorrectAnswer());
+        List<String> choices = new ArrayList<>();
+        choices.add(answer);
+        conceptEvidence.stream()
+                .map(ConceptEvidence::explanation)
+                .map(this::normalizeWhitespace)
+                .filter(value -> !value.isBlank() && !value.equals(answer))
+                .distinct()
+                .limit(3)
+                .forEach(choices::add);
+        evidenceSentences.stream()
+                .map(this::normalizeWhitespace)
+                .filter(value -> !value.isBlank() && !value.equals(answer))
+                .distinct()
+                .limit(3)
+                .forEach(value -> {
+                    if (choices.size() < 4) {
+                        choices.add(value);
+                    }
+                });
+        while (choices.size() < 4) {
+            choices.add(buildFallbackDistractor(new ConceptEvidence(question.getConceptTag(), answer), choices.size() - 1));
+        }
+        Collections.shuffle(choices);
+        return new RagGeneratedQuestionResponse(
+                question.getOrder(),
+                "multiple_choice",
+                question.getQuestion(),
+                choices.subList(0, 4),
+                answer,
+                question.getModelAnswer(),
+                question.getExplanation(),
+                question.getSourceEvidence(),
+                question.getDifficulty(),
+                question.getConceptTag(),
+                "CONCEPT_DISTINCTION"
+        );
+    }
+
     private RagGeneratedQuestionResponse toGeneratedQuestion(int order, com.fasterxml.jackson.databind.JsonNode node) {
-        String type = normalizeWhitespace(node.path("type").asText("short_answer"));
+        String type = normalizeQuestionType(normalizeWhitespace(node.path("type").asText("short_answer")));
         List<String> choices = new ArrayList<>();
         if (node.path("choices").isArray()) {
             for (com.fasterxml.jackson.databind.JsonNode choice : node.path("choices")) {
@@ -1185,21 +1614,42 @@ public class RagService {
         String explanation = normalizeWhitespace(node.path("explanation").asText());
         String sourceEvidence = normalizeWhitespace(node.path("sourceEvidence").asText());
         String difficulty = normalizeWhitespace(node.path("difficulty").asText("medium"));
+        String conceptTag = normalizeWhitespace(node.path("conceptTag").asText());
+        String understandingLevel = normalizeWhitespace(node.path("understandingLevel").asText());
 
-        if (question.isBlank() || correctAnswer.isBlank() || modelAnswer.isBlank() || explanation.isBlank()) {
+        if (question.isBlank()) {
             return null;
         }
+        if (modelAnswer.isBlank()) {
+            modelAnswer = !correctAnswer.isBlank() ? correctAnswer : sourceEvidence;
+        }
+        if (modelAnswer.isBlank()) {
+            modelAnswer = explanation;
+        }
+        if (modelAnswer.isBlank()) {
+            modelAnswer = question;
+        }
+        if (correctAnswer.isBlank()) {
+            correctAnswer = modelAnswer;
+        }
+        if (explanation.isBlank()) {
+            explanation = sourceEvidence.isBlank() ? modelAnswer : sourceEvidence;
+        }
+        if (modelAnswer.isBlank() || correctAnswer.isBlank()) {
+            return null;
+        }
+
         if ("multiple_choice".equals(type) && choices.size() != 4) {
-            return null;
+            type = "short_answer";
+            choices = List.of();
         }
-        if ("ox".equals(type) && !choices.equals(List.of("O", "X"))) {
-            return null;
+        if ("ox".equals(type)) {
+            choices = List.of("O", "X");
+            question = buildOxQuestionText(question, selectOxStatementSource(question, modelAnswer, explanation, sourceEvidence));
+            correctAnswer = "O";
         }
         if ("short_answer".equals(type)) {
             choices = List.of();
-        }
-        if ("ox".equals(type) && !List.of("O", "X").contains(correctAnswer)) {
-            return null;
         }
 
         return new RagGeneratedQuestionResponse(
@@ -1211,21 +1661,103 @@ public class RagService {
                 modelAnswer,
                 explanation,
                 sourceEvidence.isBlank() ? modelAnswer : sourceEvidence,
-                difficulty.isBlank() ? "medium" : difficulty
+                difficulty.isBlank() ? "medium" : difficulty,
+                conceptTag.isBlank() ? inferConceptTag(question, sourceEvidence, modelAnswer) : conceptTag,
+                normalizeUnderstandingLevel(understandingLevel, type, question)
         );
+    }
+
+    private String extractJsonObject(String response) {
+        String trimmed = response == null ? "" : response.trim();
+        int start = trimmed.indexOf('{');
+        int end = trimmed.lastIndexOf('}');
+        if (start >= 0 && end > start) {
+            return trimmed.substring(start, end + 1);
+        }
+        return trimmed;
+    }
+
+    private String buildOxQuestionText(String question, String modelAnswer) {
+        String statement = normalizeWhitespace(modelAnswer);
+        if (statement.isBlank()) {
+            statement = normalizeWhitespace(question);
+        }
+        if (isInvalidOxStatement(statement)) {
+            statement = normalizeWhitespace(question);
+        }
+        statement = statement
+                .replace("은(는)", "은")
+                .replace("이(가)", "이")
+                .replace("을(를)", "을")
+                .replaceAll("[?？]+$", "")
+                .replaceAll("(무엇을 의미합니까|무엇인가요|설명하세요|고르세요)$", "")
+                .trim();
+        if (isInvalidOxStatement(statement)) {
+            statement = "문서의 핵심 개념은 제시된 설명과 일치한다";
+        }
+        if (!statement.endsWith(".")) {
+            statement = statement + ".";
+        }
+        return "다음 설명이 맞으면 O, 틀리면 X를 고르세요.\n\"" + statement + "\"";
+    }
+
+    private String selectOxStatementSource(RagGeneratedQuestionResponse question) {
+        return selectOxStatementSource(
+                question.getQuestion(),
+                question.getModelAnswer(),
+                question.getExplanation(),
+                question.getSourceEvidence()
+        );
+    }
+
+    private String selectOxStatementSource(String question, String modelAnswer, String explanation, String sourceEvidence) {
+        List<String> candidates = List.of(modelAnswer, explanation, sourceEvidence, question);
+        for (String candidate : candidates) {
+            String normalized = normalizeWhitespace(candidate);
+            if (!isInvalidOxStatement(normalized)) {
+                return normalized;
+            }
+        }
+        return "문서의 핵심 개념은 제시된 설명과 일치한다";
+    }
+
+    private boolean isInvalidOxStatement(String value) {
+        String normalized = normalizeWhitespace(value);
+        if (normalized.isBlank()) {
+            return true;
+        }
+        String compact = normalized.replace(".", "").trim();
+        return compact.equalsIgnoreCase("O")
+                || compact.equalsIgnoreCase("X")
+                || compact.equalsIgnoreCase("true")
+                || compact.equalsIgnoreCase("false")
+                || compact.equals("정답")
+                || compact.equals("오답")
+                || compact.length() < 6;
+    }
+
+    private String normalizeQuestionType(String type) {
+        String normalized = type == null ? "" : type.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "multiple_choice", "multiple choice", "choice", "mcq", "객관식" -> "multiple_choice";
+            case "ox", "o/x", "true_false", "true/false", "참거짓", "ox퀴즈" -> "ox";
+            default -> "short_answer";
+        };
     }
 
     private RagGeneratedQuestionResponse buildShortAnswerQuestion(int order, ConceptEvidence evidence) {
         return new RagGeneratedQuestionResponse(
                 order,
                 "short_answer",
-                evidence.concept() + "이(가) 무엇인지 설명하세요.",
+                evidence.concept() + " 개념을 설명하세요.",
                 List.of(),
                 evidence.explanation(),
                 evidence.explanation(),
                 evidence.concept() + "의 정의와 역할을 설명할 수 있어야 문서 내용을 이해한 것입니다.",
                 evidence.explanation(),
-                "medium"
+                "medium",
+                evidence.concept(),
+                "CONCEPT_UNDERSTANDING"
         );
     }
 
@@ -1236,23 +1768,25 @@ public class RagService {
                 .orElse(null);
         boolean buildFalseStatement = distractor != null && order % 2 == 0;
         String statement = buildFalseStatement
-                ? evidence.concept() + "은(는) " + distractor.explanation()
-                : evidence.concept() + "은(는) " + evidence.explanation();
+                ? evidence.concept() + "의 설명은 다음과 같다: " + distractor.explanation()
+                : evidence.explanation();
         String correctAnswer = buildFalseStatement ? "X" : "O";
         String explanation = buildFalseStatement
-                ? "문서에서 " + evidence.concept() + "은(는) " + evidence.explanation() + "로 설명되므로 제시된 문장은 틀렸습니다."
+                ? "문서 근거에서 " + evidence.concept() + " 개념은 다음과 같이 설명됩니다: " + evidence.explanation()
                 : "문서에서 " + evidence.concept() + "에 대한 설명과 일치하므로 O가 정답입니다.";
 
         return new RagGeneratedQuestionResponse(
                 order,
                 "ox",
-                "다음 설명이 맞으면 O, 틀리면 X를 고르세요. \"" + statement + "\"",
+                "다음 설명이 맞으면 O, 틀리면 X를 고르세요.\n\"" + statement + "\"",
                 List.of("O", "X"),
                 correctAnswer,
                 evidence.explanation(),
                 explanation,
                 evidence.explanation(),
-                "easy"
+                "easy",
+                evidence.concept(),
+                "CONCEPT_UNDERSTANDING"
         );
     }
 
@@ -1281,9 +1815,11 @@ public class RagService {
                 choices,
                 target.explanation(),
                 target.explanation(),
-                "정답은 문서에서 " + target.concept() + "을(를) 직접 설명한 문장입니다.",
+                "정답은 문서에서 " + target.concept() + " 개념을 직접 설명한 문장입니다.",
                 target.explanation(),
-                "medium"
+                "medium",
+                target.concept(),
+                "CONCEPT_DISTINCTION"
         );
     }
 
@@ -1305,7 +1841,9 @@ public class RagService {
                     fallback,
                     "문서 근거와 가장 직접적으로 일치하는 설명이 정답입니다.",
                     fallback,
-                    "easy"
+                    "easy",
+                    inferConceptTag(fallback, fallback, fallback),
+                    "CONCEPT_DISTINCTION"
             );
         }
 
@@ -1317,7 +1855,7 @@ public class RagService {
             return new RagGeneratedQuestionResponse(
                     order,
                     "ox",
-                    "다음 설명이 맞으면 O, 틀리면 X를 고르세요. \"" + statement + "\"",
+                    "다음 설명이 맞으면 O, 틀리면 X를 고르세요.\n\"" + statement + "\"",
                     List.of("O", "X"),
                     isTrue ? "O" : "X",
                     fallback,
@@ -1325,7 +1863,9 @@ public class RagService {
                             ? "문서 내용과 일치하므로 O가 정답입니다."
                             : "뒤 문장은 문서 근거와 일치하지 않으므로 X가 정답입니다.",
                     fallback,
-                    "easy"
+                    "easy",
+                    inferConceptTag(fallback, fallback, fallback),
+                    "CONCEPT_UNDERSTANDING"
             );
         }
 
@@ -1338,15 +1878,48 @@ public class RagService {
                 fallback,
                 "핵심 내용을 자신의 말로 다시 설명하는 연습용 문제입니다.",
                 fallback,
-                "easy"
+                "easy",
+                inferConceptTag(fallback, fallback, fallback),
+                "CONCEPT_APPLICATION"
         );
+    }
+
+    private String inferConceptTag(String question, String sourceEvidence, String modelAnswer) {
+        String[] candidates = {question, sourceEvidence, modelAnswer};
+        for (String candidate : candidates) {
+            String extracted = extractLeadingConcept(normalizeWhitespace(candidate));
+            if (extracted != null && !extracted.isBlank() && !"문서".equals(extracted)) {
+                return extracted;
+            }
+        }
+        return "핵심 개념";
+    }
+
+    private String normalizeUnderstandingLevel(String value, String type, String question) {
+        if ("CONCEPT_UNDERSTANDING".equals(value)
+                || "CONCEPT_DISTINCTION".equals(value)
+                || "CONCEPT_APPLICATION".equals(value)) {
+            return value;
+        }
+
+        String normalizedQuestion = normalizeWhitespace(question);
+        if (normalizedQuestion.contains("상황") || normalizedQuestion.contains("사례") || normalizedQuestion.contains("예시")) {
+            return "CONCEPT_APPLICATION";
+        }
+        if ("multiple_choice".equals(type)) {
+            return "CONCEPT_DISTINCTION";
+        }
+        if (normalizedQuestion.contains("무엇") || normalizedQuestion.contains("설명")) {
+            return "CONCEPT_UNDERSTANDING";
+        }
+        return "CONCEPT_APPLICATION";
     }
 
     private String buildFallbackDistractor(ConceptEvidence target, int index) {
         return switch (index % 3) {
-            case 0 -> target.concept() + "은(는) 문서에서 다루지 않는 주변 개념이라고 설명한다.";
+            case 0 -> target.concept() + " 개념은 문서에서 다루지 않는 주변 개념이라고 설명한다.";
             case 1 -> target.concept() + "의 핵심은 구현이 아니라 결과만 외우는 것이라고 설명한다.";
-            default -> target.concept() + "은(는) 다른 개념과 구분되지 않는다고 설명한다.";
+            default -> target.concept() + " 개념은 다른 개념과 구분되지 않는다고 설명한다.";
         };
     }
 
@@ -1383,7 +1956,7 @@ public class RagService {
     }
 
     private int normalizeCount(Integer count) {
-        int normalized = count == null ? 5 : count;
+        int normalized = count == null ? 3 : count;
         if (normalized < 1 || normalized > 10) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "count must be between 1 and 10");
         }

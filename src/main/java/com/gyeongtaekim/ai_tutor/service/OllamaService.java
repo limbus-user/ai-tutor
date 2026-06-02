@@ -3,16 +3,21 @@ package com.gyeongtaekim.ai_tutor.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class OllamaService {
 
     @Value("${ollama.enabled:false}")
@@ -43,7 +48,11 @@ public class OllamaService {
         request.put("system", systemPrompt);
         request.put("prompt", prompt);
         request.put("stream", false);
-        request.put("options", Map.of("temperature", temperature));
+        request.put("options", Map.of(
+                "temperature", temperature,
+                "num_ctx", 2048,
+                "num_predict", 700
+        ));
 
         return callGenerate(request);
     }
@@ -57,26 +66,37 @@ public class OllamaService {
         request.put("model", chatModel);
         request.put("system", systemPrompt);
         request.put("prompt", prompt);
-        request.put("format", "json");
         request.put("stream", false);
-        request.put("options", Map.of("temperature", temperature));
+        request.put("options", Map.of(
+                "temperature", temperature,
+                "num_ctx", 2048,
+                "num_predict", 900
+        ));
 
         return callGenerate(request);
     }
 
     private String callGenerate(Map<String, Object> request) {
         try {
+            SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+            requestFactory.setConnectTimeout(Duration.ofSeconds(5));
+            requestFactory.setReadTimeout(Duration.ofSeconds(180));
+
             RestClient client = RestClient.builder()
                     .baseUrl(baseUrl)
+                    .requestFactory(requestFactory)
                     .build();
 
-            String responseBody = client.post()
+            byte[] requestBody = objectMapper.writeValueAsBytes(request);
+
+            byte[] responseBytes = client.post()
                     .uri("/api/generate")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body(request)
+                    .body(requestBody)
                     .retrieve()
-                    .body(String.class);
+                    .body(byte[].class);
 
+            String responseBody = responseBytes == null ? null : new String(responseBytes, StandardCharsets.UTF_8);
             if (responseBody == null || responseBody.isBlank()) {
                 return null;
             }
@@ -85,6 +105,7 @@ public class OllamaService {
             JsonNode response = root.get("response");
             return response == null || response.isNull() ? null : response.asText().trim();
         } catch (Exception e) {
+            log.warn("Ollama generation request failed: {}", e.getMessage());
             return null;
         }
     }

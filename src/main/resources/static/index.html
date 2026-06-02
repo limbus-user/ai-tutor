@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Tutor</title>
-    <link rel="stylesheet" href="/app.css">
+    <link rel="stylesheet" href="/app.css?v=20260602-2">
 </head>
 <body>
 <div class="app-shell">
@@ -182,6 +182,7 @@
                 </div>
 
                 <form id="quiz-form" class="stack compact-stack">
+                    <p id="quiz-document-selection" class="quiz-document-selection">출제 PDF를 선택해 주세요.</p>
                     <label>
                         <span>문제 타입</span>
                         <select id="quiz-type">
@@ -193,7 +194,7 @@
                     </label>
                     <label>
                         <span>문제 개수</span>
-                        <input id="quiz-count" type="number" min="1" max="10" value="5">
+                        <input id="quiz-count" type="number" min="3" max="10" value="3">
                     </label>
                     <button type="submit">퀴즈 생성</button>
                 </form>
@@ -255,7 +256,7 @@
             </div>
         </button>
         <div class="document-row-trailing">
-            <div class="document-selected-indicator">✓</div>
+            <button type="button" class="document-selected-indicator" aria-label="퀴즈 출제 PDF 선택" aria-pressed="false">✓</button>
             <button type="button" class="document-more-button" aria-label="문서 메뉴">⋮</button>
         </div>
         <div class="document-menu hidden">
@@ -318,12 +319,13 @@
         </details>
         <div class="quiz-feedback"></div>
         <div class="quiz-session-actions">
+            <button type="button" class="secondary-button quiz-prev-button">이전</button>
             <button type="button" class="secondary-button quiz-check-button">정답 확인</button>
             <button type="button" class="quiz-next-button">다음</button>
         </div>
     </article>
 </template>
 
-<script src="/app.js"></script>
+<script src="/app.js?v=20260602-2"></script>
 </body>
 </html>

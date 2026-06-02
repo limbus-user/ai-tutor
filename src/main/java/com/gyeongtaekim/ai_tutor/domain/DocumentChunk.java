@@ -27,7 +27,7 @@ public class DocumentChunk {
     @Column(nullable = false)
     private int chunkIndex;
 
-    @Column(nullable = false, length = 4000)
+    @Column(nullable = false, columnDefinition = "TEXT")
     private String chunkText;
 
     @Column(nullable = false, length = 1000)

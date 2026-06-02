@@ -74,11 +74,12 @@ public class RagController {
     @PostMapping("/generate-questions")
     public ResponseEntity<RagGeneratedQuestionsResponse> generateQuestions(
             @RequestParam(value = "documentId", required = false) Long documentId,
+            @RequestParam(value = "documentIds", required = false) List<Long> documentIds,
             @RequestParam(value = "fileName", required = false) String fileName,
             @RequestParam(value = "type", required = false, defaultValue = "mixed") String type,
             @RequestParam(value = "count", required = false, defaultValue = "5") Integer count
     ) throws Exception {
-        RagGeneratedQuestionsResponse questions = ragService.generateQuestions(documentId, fileName, type, count);
+        RagGeneratedQuestionsResponse questions = ragService.generateQuestions(documentId, documentIds, fileName, type, count);
         return ResponseEntity.ok(questions);
     }
 }

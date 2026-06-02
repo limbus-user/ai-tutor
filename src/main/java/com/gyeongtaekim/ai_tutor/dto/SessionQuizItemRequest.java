@@ -15,4 +15,6 @@ public class SessionQuizItemRequest {
     private String explanation;
     private String sourceEvidence;
     private String difficulty;
+    private String conceptTag;
+    private String understandingLevel;
 }

@@ -44,6 +44,7 @@ public class ProblemService {
                 request.getAnswer(),
                 request.getExplanation(),
                 Problem.Difficulty.valueOf(request.getDifficulty().toUpperCase(Locale.ROOT)),
+                parseUnderstandingLevel(request.getUnderstandingLevel()),
                 parseProblemType(request.getType()),
                 concepts
         );
@@ -97,5 +98,13 @@ public class ProblemService {
             return Problem.ProblemType.TRUE_FALSE;
         }
         return Problem.ProblemType.valueOf(normalized);
+    }
+
+    private Problem.UnderstandingLevel parseUnderstandingLevel(String understandingLevel) {
+        if (understandingLevel == null || understandingLevel.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "understandingLevel is required");
+        }
+
+        return Problem.UnderstandingLevel.valueOf(understandingLevel.trim().toUpperCase(Locale.ROOT));
     }
 }

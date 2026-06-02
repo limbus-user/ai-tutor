@@ -10,6 +10,7 @@ public class ProblemCreateRequest {
     private String answer;
     private String explanation;
     private String difficulty;
+    private String understandingLevel;
     private String type;
     private List<Long> conceptIds;
 }

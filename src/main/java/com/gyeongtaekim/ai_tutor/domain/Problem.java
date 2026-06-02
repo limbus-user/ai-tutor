@@ -40,6 +40,10 @@ public class Problem {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
+    private UnderstandingLevel understandingLevel;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
     private ProblemType type;
 
     @ManyToMany
@@ -55,6 +59,7 @@ public class Problem {
             String answer,
             String explanation,
             Difficulty difficulty,
+            UnderstandingLevel understandingLevel,
             ProblemType type,
             List<Concept> concepts
     ) {
@@ -62,12 +67,19 @@ public class Problem {
         this.answer = answer;
         this.explanation = explanation;
         this.difficulty = difficulty;
+        this.understandingLevel = understandingLevel;
         this.type = type;
         this.concepts = concepts;
     }
 
     public enum Difficulty {
         EASY, MEDIUM, HARD
+    }
+
+    public enum UnderstandingLevel {
+        CONCEPT_UNDERSTANDING,
+        CONCEPT_DISTINCTION,
+        CONCEPT_APPLICATION
     }
 
     public enum ProblemType {

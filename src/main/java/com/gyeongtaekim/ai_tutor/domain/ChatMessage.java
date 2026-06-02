@@ -32,7 +32,7 @@ public class ChatMessage {
     @Column(nullable = false)
     private MessageRole role;
 
-    @Column(nullable = false, length = 4000)
+    @Column(nullable = false, columnDefinition = "TEXT")
     private String content;
 
     @Column(length = 1000)

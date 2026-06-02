@@ -237,6 +237,7 @@ class AiTutorIntegrationTest {
                                   "answer":"O",
                                   "explanation":"Binary search requires the input to be sorted.",
                                   "difficulty":"easy",
+                                  "understandingLevel":"CONCEPT_UNDERSTANDING",
                                   "type":"ox",
                                   "conceptIds":[%d]
                                 }
@@ -309,11 +310,13 @@ class AiTutorIntegrationTest {
                 .andExpect(jsonPath("$.questions[0].correctAnswer").isNotEmpty())
                 .andExpect(jsonPath("$.questions[0].modelAnswer").isNotEmpty())
                 .andExpect(jsonPath("$.questions[0].explanation").isNotEmpty())
+                .andExpect(jsonPath("$.questions[0].conceptTag").isNotEmpty())
+                .andExpect(jsonPath("$.questions[0].understandingLevel").isNotEmpty())
                 .andReturn();
 
         JsonNode generatedQuestions = objectMapper.readTree(generatedQuestionsResult.getResponse().getContentAsByteArray());
 
-        mockMvc.perform(post("/api/chat/sessions/{sessionId}/quizzes", sessionId)
+        MvcResult savedQuizzesResult = mockMvc.perform(post("/api/chat/sessions/{sessionId}/quizzes", sessionId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -324,7 +327,28 @@ class AiTutorIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].sessionId").value(sessionId))
                 .andExpect(jsonPath("$[0].documentId").value(documentId))
-                .andExpect(jsonPath("$[0].question").isNotEmpty());
+                .andExpect(jsonPath("$[0].question").isNotEmpty())
+                .andExpect(jsonPath("$[0].conceptTag").isNotEmpty())
+                .andExpect(jsonPath("$[0].understandingLevel").isNotEmpty())
+                .andReturn();
+
+        JsonNode savedQuizzes = objectMapper.readTree(savedQuizzesResult.getResponse().getContentAsByteArray());
+        long firstQuizId = savedQuizzes.get(0).get("id").asLong();
+        String firstQuizAnswer = savedQuizzes.get(0).get("correctAnswer").asText();
+
+        mockMvc.perform(post("/api/chat/sessions/{sessionId}/quizzes/{quizId}/submit", sessionId, firstQuizId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "submittedAnswer": %s
+                                }
+                                """.formatted(objectMapper.writeValueAsString(firstQuizAnswer))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(firstQuizId))
+                .andExpect(jsonPath("$.documentId").value(documentId))
+                .andExpect(jsonPath("$.correct").value(true))
+                .andExpect(jsonPath("$.solved").value(true))
+                .andExpect(jsonPath("$.evaluationFeedback").value(org.hamcrest.Matchers.containsString("정답입니다.")));
 
         mockMvc.perform(get("/api/chat/sessions/{sessionId}/quizzes", sessionId))
                 .andExpect(status().isOk())
@@ -350,6 +374,10 @@ class AiTutorIntegrationTest {
                 .andExpect(jsonPath("$.questions.length()").value(3))
                 .andExpect(jsonPath("$.questions[0].type").value("multiple_choice"))
                 .andExpect(jsonPath("$.questions[0].choices.length()").value(4))
+                .andExpect(jsonPath("$.questions[1].type").value("multiple_choice"))
+                .andExpect(jsonPath("$.questions[1].choices.length()").value(4))
+                .andExpect(jsonPath("$.questions[2].type").value("multiple_choice"))
+                .andExpect(jsonPath("$.questions[2].choices.length()").value(4))
                 .andExpect(jsonPath("$.questions[0].correctAnswer").isNotEmpty());
 
         mockMvc.perform(post("/api/rag/generate-questions")
@@ -359,6 +387,7 @@ class AiTutorIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.questions.length()").value(2))
                 .andExpect(jsonPath("$.questions[0].type").value("ox"))
+                .andExpect(jsonPath("$.questions[0].question").value(org.hamcrest.Matchers.containsString("고르세요.\n\"")))
                 .andExpect(jsonPath("$.questions[0].choices[0]").value("O"))
                 .andExpect(jsonPath("$.questions[0].choices[1]").value("X"))
                 .andExpect(jsonPath("$.questions[0].correctAnswer").isNotEmpty())
@@ -553,6 +582,41 @@ class AiTutorIntegrationTest {
         assertThat(sessionQuizRepository.findBySessionIdOrderByCreatedAtAscQuestionOrderAsc(sessionId)).isEmpty();
     }
 
+    @Test
+    void generatesQuestionsFromMultipleSelectedDocuments() throws Exception {
+        MockMultipartFile firstFile = new MockMultipartFile(
+                "file",
+                "sorting.pdf",
+                "application/pdf",
+                createPdf("Merge sort divides an array and combines sorted halves.")
+        );
+        MockMultipartFile secondFile = new MockMultipartFile(
+                "file",
+                "graph.pdf",
+                "application/pdf",
+                createPdf("Breadth first search explores graph vertices level by level.")
+        );
+
+        MvcResult firstUpload = mockMvc.perform(multipart("/api/rag/upload").file(firstFile))
+                .andExpect(status().isOk())
+                .andReturn();
+        MvcResult secondUpload = mockMvc.perform(multipart("/api/rag/upload").file(secondFile))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        long firstDocumentId = objectMapper.readTree(firstUpload.getResponse().getContentAsByteArray()).get("documentId").asLong();
+        long secondDocumentId = objectMapper.readTree(secondUpload.getResponse().getContentAsByteArray()).get("documentId").asLong();
+
+        mockMvc.perform(post("/api/rag/generate-questions")
+                        .param("documentIds", String.valueOf(firstDocumentId), String.valueOf(secondDocumentId))
+                        .param("type", "mixed")
+                        .param("count", "3"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.documentId").value(firstDocumentId))
+                .andExpect(jsonPath("$.title").value("sorting.pdf, graph.pdf"))
+                .andExpect(jsonPath("$.questions.length()").value(3));
+    }
+
     private long createUser(String email) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/users")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -595,6 +659,7 @@ class AiTutorIntegrationTest {
                                   "answer":"O(log n)",
                                   "explanation":"The search interval is halved each step.",
                                   "difficulty":"easy",
+                                  "understandingLevel":"CONCEPT_UNDERSTANDING",
                                   "type":"short_answer",
                                   "conceptIds":[%d]
                                 }

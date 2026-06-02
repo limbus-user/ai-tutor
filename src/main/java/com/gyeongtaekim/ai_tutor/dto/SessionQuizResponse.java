@@ -26,6 +26,15 @@ public class SessionQuizResponse {
     private final String explanation;
     private final String sourceEvidence;
     private final String difficulty;
+    private final String conceptTag;
+    private final String understandingLevel;
+    private final String submittedAnswer;
+    private final Boolean correct;
+    private final String evaluationFeedback;
+    private final Integer attemptCount;
+    private final Integer resetCount;
+    private final Boolean solved;
+    private final LocalDateTime lastSolvedAt;
     private final LocalDateTime createdAt;
 
     public SessionQuizResponse(SessionQuiz quiz) {
@@ -43,6 +52,15 @@ public class SessionQuizResponse {
         this.explanation = quiz.getExplanation();
         this.sourceEvidence = quiz.getSourceEvidence();
         this.difficulty = quiz.getDifficulty();
+        this.conceptTag = quiz.getConceptTag();
+        this.understandingLevel = quiz.getUnderstandingLevel();
+        this.submittedAnswer = quiz.getSubmittedAnswer();
+        this.correct = quiz.getCorrect();
+        this.evaluationFeedback = quiz.getEvaluationFeedback();
+        this.attemptCount = quiz.getAttemptCount();
+        this.resetCount = quiz.getResetCount();
+        this.solved = quiz.getSolved();
+        this.lastSolvedAt = quiz.getLastSolvedAt();
         this.createdAt = quiz.getCreatedAt();
     }
 
