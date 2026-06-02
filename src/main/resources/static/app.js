@@ -224,7 +224,7 @@ async function apiFetch(url, options = {}) {
 function renderHomeHeader() {
   const roleLabel = state.role ? ` / ${state.role}` : "";
   document.getElementById("home-user-summary").textContent = `${state.userName} (${state.userEmail})${roleLabel}`;
-  document.getElementById("dev-mode-wrap").classList.toggle("hidden", !isAdmin());
+  document.getElementById("dev-mode-wrap")?.classList.add("hidden");
 }
 
 function renderSessionList() {
@@ -251,10 +251,17 @@ function renderSessionList() {
 
 function renderWorkspaceHeader() {
   if (!state.currentSession) return;
+
   document.getElementById("workspace-title").textContent = state.currentSession.title;
   document.getElementById("workspace-subtitle").textContent = `sessionId ${state.currentSession.id} · ${state.userName}`;
-  const currentDocument = state.currentWorkspace?.documents?.find((document) => document.documentId === state.currentWorkspace.currentDocumentId);
-  document.getElementById("current-document-badge").textContent = currentDocument ? currentDocument.title : "문서 미선택";
+
+  const selectedIds = getSelectedQuizDocumentIds();
+  const selectedDocuments = (state.currentWorkspace?.documents || [])
+      .filter((document) => selectedIds.includes(document.documentId));
+
+  document.getElementById("current-document-badge").textContent = selectedDocuments.length
+      ? `선택 PDF ${selectedDocuments.length}개`
+      : "문서 미선택";
 }
 
 function getSelectedQuizDocumentIds() {
@@ -297,8 +304,8 @@ function renderDocuments() {
     const deleteButton = fragment.querySelector(".delete-document-button");
     const selectedIndicator = fragment.querySelector(".document-selected-indicator");
 
-    card.classList.toggle("selected", documentInfo.documentId === state.currentWorkspace.currentDocumentId);
     const selectedForQuiz = getSelectedQuizDocumentIds().includes(documentInfo.documentId);
+    card.classList.toggle("selected", selectedForQuiz);
     selectedIndicator.classList.toggle("active", selectedForQuiz);
     selectedIndicator.setAttribute("aria-pressed", String(selectedForQuiz));
     menu.classList.toggle("hidden", state.openDocumentMenuId !== documentInfo.documentId);
@@ -307,17 +314,26 @@ function renderDocuments() {
       `${documentInfo.subject || "-"} / ${documentInfo.unitName || "-"} / ${documentInfo.trustLevel || "-"}`;
 
     openButton.addEventListener("click", () => {
-      state.currentWorkspace.currentDocumentId = documentInfo.documentId;
-      state.openDocumentMenuId = null;
-      renderDocuments();
-      renderQuizSets();
-    });
-    selectedIndicator.addEventListener("click", () => {
       const selectedIds = getSelectedQuizDocumentIds();
       state.currentWorkspace.selectedQuizDocumentIds = selectedIds.includes(documentInfo.documentId)
-        ? selectedIds.filter((documentId) => documentId !== documentInfo.documentId)
-        : [...selectedIds, documentInfo.documentId];
+          ? selectedIds.filter((documentId) => documentId !== documentInfo.documentId)
+          : [...selectedIds, documentInfo.documentId];
+
+      state.openDocumentMenuId = null;
       renderDocuments();
+    });
+
+    selectedIndicator.addEventListener("click", (event) => {
+      event.stopPropagation();
+
+      const selectedIds = getSelectedQuizDocumentIds();
+      state.currentWorkspace.selectedQuizDocumentIds = selectedIds.includes(documentInfo.documentId)
+          ? selectedIds.filter((documentId) => documentId !== documentInfo.documentId)
+          : [...selectedIds, documentInfo.documentId];
+
+      renderDocuments();
+      renderWorkspaceHeader();
+      renderQuizDocumentSelection();
     });
 
     downloadButton.addEventListener("click", () => {
@@ -398,6 +414,8 @@ async function deleteDocument(documentInfo) {
 
     state.openDocumentMenuId = null;
     renderDocuments();
+    renderWorkspaceHeader();
+    renderQuizDocumentSelection();
     renderQuizSets();
   } catch (error) {
     alert(formatErrorMessage(error, "PDF를 삭제하지 못했습니다."));
@@ -456,11 +474,9 @@ function renderMessages() {
 
 function getCurrentDocumentQuizSets() {
   const quizzes = state.currentWorkspace?.quizzes || [];
-  const documentId = state.currentWorkspace?.currentDocumentId;
-  const filtered = quizzes.filter((quiz) => (documentId ? quiz.documentId === documentId : true));
   const map = new Map();
 
-  filtered.forEach((quiz) => {
+  quizzes.forEach((quiz) => {
     if (!map.has(quiz.quizSetId)) {
       map.set(quiz.quizSetId, {
         quizSetId: quiz.quizSetId,
@@ -1197,7 +1213,7 @@ async function openExistingSession(sessionId) {
       documents,
       quizzes,
       currentDocumentId,
-      selectedQuizDocumentIds: currentDocumentId ? [currentDocumentId] : [],
+      selectedQuizDocumentIds: documents.map((document) => document.documentId),
     };
 
     renderWorkspaceHeader();
@@ -1321,7 +1337,7 @@ async function uploadWorkspacePdf(event) {
       unitName: document.getElementById("workspace-unit").value,
       trustLevel: document.getElementById("workspace-trust").value,
     });
-    state.currentWorkspace.currentDocumentId = uploadResponse.documentId;
+
     state.currentWorkspace.selectedQuizDocumentIds = [
       ...new Set([...getSelectedQuizDocumentIds(), uploadResponse.documentId]),
     ];
@@ -1350,8 +1366,10 @@ async function sendChat(event) {
     if (!question) throw new Error("질문을 입력해 주세요.");
 
     const payload = { question };
-    if (state.currentWorkspace?.currentDocumentId) {
-      payload.documentId = state.currentWorkspace.currentDocumentId;
+
+    const selectedDocumentIds = getSelectedQuizDocumentIds();
+    if (selectedDocumentIds.length === 1) {
+      payload.documentId = selectedDocumentIds[0];
     }
 
     await apiFetch(`/api/tutor/sessions/${state.currentSession.id}/ask`, {
@@ -1409,7 +1427,7 @@ async function generateQuiz(event) {
     });
 
     state.currentWorkspace.quizzes = [...(state.currentWorkspace.quizzes || []), ...savedQuizzes];
-    state.currentWorkspace.currentDocumentId = documentId;
+    //state.currentWorkspace.currentDocumentId = documentId;
     renderDocuments();
     renderQuizSets();
   } catch (error) {
