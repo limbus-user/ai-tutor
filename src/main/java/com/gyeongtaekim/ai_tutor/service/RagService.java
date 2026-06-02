@@ -354,12 +354,6 @@ public class RagService {
         if (!llmQuestions.isEmpty()) {
             return llmQuestions;
         }
-        if (ollamaService.isEnabled()) {
-            throw new ResponseStatusException(
-                    HttpStatus.SERVICE_UNAVAILABLE,
-                    "LLM question generation failed. Please check Ollama model response."
-            );
-        }
 
         List<RagGeneratedQuestionResponse> questions = new ArrayList<>();
         questions.add(new RagGeneratedQuestionResponse(
@@ -468,6 +462,9 @@ public class RagService {
             for (com.fasterxml.jackson.databind.JsonNode node : questionsNode) {
                 String question = normalizeWhitespace(node.path("question").asText());
                 String modelAnswer = normalizeWhitespace(node.path("modelAnswer").asText());
+                if (modelAnswer.isBlank()) {
+                    modelAnswer = normalizeWhitespace(node.path("answer").asText());
+                }
                 String explanation = normalizeWhitespace(node.path("explanation").asText());
                 if (question.isBlank() || modelAnswer.isBlank() || explanation.isBlank()) {
                     continue;
@@ -478,7 +475,7 @@ public class RagService {
                 }
             }
 
-            return questions.size() == 5 ? questions : List.of();
+            return questions.isEmpty() ? List.of() : questions;
         } catch (Exception e) {
             return List.of();
         }
@@ -1096,12 +1093,6 @@ public class RagService {
         if (!llmQuestions.isEmpty()) {
             return llmQuestions;
         }
-        if (ollamaService.isEnabled()) {
-            throw new ResponseStatusException(
-                    HttpStatus.SERVICE_UNAVAILABLE,
-                    "LLM question generation failed. Please check Ollama model response."
-            );
-        }
 
         List<RagGeneratedQuestionResponse> questions = new ArrayList<>();
         List<ConceptEvidence> pool = conceptEvidence.isEmpty()
@@ -1205,6 +1196,8 @@ public class RagService {
                 [Raw Excerpt]
                 %s
                 """.formatted(evidenceBlock, sentenceBlock, abbreviate(rawText, 1800))
+                ,
+                Math.max(900, count * 320)
         );
 
         if (response == null || response.isBlank()) {
@@ -1611,6 +1604,9 @@ public class RagService {
         String question = normalizeWhitespace(node.path("question").asText());
         String correctAnswer = normalizeWhitespace(node.path("correctAnswer").asText());
         String modelAnswer = normalizeWhitespace(node.path("modelAnswer").asText());
+        if (modelAnswer.isBlank()) {
+            modelAnswer = normalizeWhitespace(node.path("answer").asText());
+        }
         String explanation = normalizeWhitespace(node.path("explanation").asText());
         String sourceEvidence = normalizeWhitespace(node.path("sourceEvidence").asText());
         String difficulty = normalizeWhitespace(node.path("difficulty").asText("medium"));
@@ -1669,6 +1665,9 @@ public class RagService {
 
     private String extractJsonObject(String response) {
         String trimmed = response == null ? "" : response.trim();
+        if (trimmed.startsWith("```")) {
+            trimmed = trimmed.replaceAll("(?s)^```(?:json)?\\s*", "").replaceAll("\\s*```$", "").trim();
+        }
         int start = trimmed.indexOf('{');
         int end = trimmed.lastIndexOf('}');
         if (start >= 0 && end > start) {

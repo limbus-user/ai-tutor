@@ -32,6 +32,12 @@ public class OllamaService {
     @Value("${ollama.temperature:0.1}")
     private double temperature;
 
+    @Value("${ollama.num-ctx:8192}")
+    private int numCtx;
+
+    @Value("${ollama.num-predict:900}")
+    private int numPredict;
+
     private final ObjectMapper objectMapper;
 
     public boolean isEnabled() {
@@ -50,14 +56,18 @@ public class OllamaService {
         request.put("stream", false);
         request.put("options", Map.of(
                 "temperature", temperature,
-                "num_ctx", 2048,
-                "num_predict", 700
+                "num_ctx", numCtx,
+                "num_predict", Math.max(700, numPredict)
         ));
 
         return callGenerate(request);
     }
 
     public String generateJson(String systemPrompt, String prompt) {
+        return generateJson(systemPrompt, prompt, numPredict);
+    }
+
+    public String generateJson(String systemPrompt, String prompt, int requestedNumPredict) {
         if (!isEnabled()) {
             return null;
         }
@@ -66,11 +76,12 @@ public class OllamaService {
         request.put("model", chatModel);
         request.put("system", systemPrompt);
         request.put("prompt", prompt);
+        request.put("format", "json");
         request.put("stream", false);
         request.put("options", Map.of(
                 "temperature", temperature,
-                "num_ctx", 2048,
-                "num_predict", 900
+                "num_ctx", numCtx,
+                "num_predict", Math.max(numPredict, requestedNumPredict)
         ));
 
         return callGenerate(request);
