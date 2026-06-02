@@ -428,18 +428,32 @@ public class RagService {
                 """
                 You create Korean study questions from PDF evidence.
                 Return strict JSON only.
+                Do not use markdown.
+                Do not add explanations outside JSON.
+        
                 The JSON shape must be:
                 {"questions":[{"question":"...","modelAnswer":"...","explanation":"..."}]}
+        
                 Make exactly 5 items.
                 Do not invent facts outside the evidence.
+        
+                Question quality rules:
+                - All questions must be written in Korean.
+                - Do not create a short_answer question that asks whether a statement is true or false.
+                - Do not create a short_answer question that can be answered with only "O", "X", "true", "false", "맞다", "틀리다", "예", or "아니오".
+                - Short answer questions must ask the learner to explain a concept, compare two concepts, describe a relationship, give a reason, or connect an example to a concept.
+                - For short answer questions, the modelAnswer must be a complete explanatory sentence, not just a keyword.
+                - Avoid questions that start with "다음 설명이 맞으면", "맞는가", "옳은가", "참인가", "O/X".
+                - If a question asks for true/false judgment, it must not be generated as short_answer.
+                - Do not repeat the same question pattern.
                 """,
                 """
                 [Concept Evidence]
                 %s
-
+        
                 [Supporting Sentences]
                 %s
-
+        
                 [Raw Excerpt]
                 %s
                 """.formatted(evidenceBlock, sentenceBlock, rawExcerpt)
@@ -1176,6 +1190,11 @@ public class RagService {
                 For ox, question must be a declarative true/false statement, not a "what is" or "explain" question.
                 For multiple_choice, include exactly 4 choices and set correctAnswer to the exact correct choice text.
                 For short_answer, choices must be an empty array.
+                For short_answer, do not create O/X, true/false, yes/no, or judgment-only questions.
+                For short_answer, the question must not be answerable with only "O", "X", "맞다", "틀리다", "예", or "아니오".
+                For short_answer, the question must require explanation, comparison, reason, relationship, or example-based explanation.
+                For short_answer, avoid questions starting with "다음 설명이 맞으면", "맞는가", "옳은가", "참인가", "O/X".
+                If a question asks whether a statement is true or false, its type must be ox, not short_answer.
                 For ox, choices must be exactly ["O","X"] and correctAnswer must be either O or X.
                 understandingLevel must be one of CONCEPT_UNDERSTANDING, CONCEPT_DISTINCTION, CONCEPT_APPLICATION.
                 If %d is 3 or more, include at least one question for each understandingLevel.
@@ -1216,9 +1235,18 @@ public class RagService {
             for (com.fasterxml.jackson.databind.JsonNode node : questionsNode) {
                 RagGeneratedQuestionResponse question = toGeneratedQuestion(order++, node);
                 question = coerceQuestionType(question, type, conceptEvidence, evidenceSentences);
+
+                if (question != null
+                        && "short_answer".equals(question.getType())
+                        && isOxLikeQuestion(question.getQuestion())) {
+                    continue;
+                }
+
+
                 if (question != null && isValidQuestionType(question.getType(), type)) {
                     questions.add(question);
                 }
+
                 if (questions.size() == count) {
                     break;
                 }
@@ -1229,6 +1257,22 @@ public class RagService {
         } catch (Exception e) {
             return List.of();
         }
+    }
+
+    private boolean isOxLikeQuestion(String question) {
+        String normalized = normalizeWhitespace(question).toLowerCase(Locale.ROOT);
+
+        return normalized.contains("다음 설명이 맞으면")
+                || normalized.contains("틀리면 x")
+                || normalized.contains("맞으면 o")
+                || normalized.contains("o/x")
+                || normalized.contains("ox")
+                || normalized.contains("맞는가")
+                || normalized.contains("옳은가")
+                || normalized.contains("참인가")
+                || normalized.contains("참 또는 거짓")
+                || normalized.contains("true or false")
+                || normalized.matches(".*(맞다|틀리다|예|아니오)\\s*(로|으로)?\\s*(답|대답).*");
     }
 
     private void fillMissingLlmQuestions(
@@ -1526,6 +1570,10 @@ public class RagService {
             );
         }
         if ("short_answer".equals(requestedType)) {
+            if (isOxLikeQuestion(question.getQuestion())) {
+                return null;
+            }
+
             return new RagGeneratedQuestionResponse(
                     question.getOrder(),
                     "short_answer",
@@ -1601,52 +1649,57 @@ public class RagService {
             }
         }
 
-        String question = normalizeWhitespace(node.path("question").asText());
-        String correctAnswer = normalizeWhitespace(node.path("correctAnswer").asText());
-        String modelAnswer = normalizeWhitespace(node.path("modelAnswer").asText());
-        if (modelAnswer.isBlank()) {
-            modelAnswer = normalizeWhitespace(node.path("answer").asText());
-        }
-        String explanation = normalizeWhitespace(node.path("explanation").asText());
-        String sourceEvidence = normalizeWhitespace(node.path("sourceEvidence").asText());
-        String difficulty = normalizeWhitespace(node.path("difficulty").asText("medium"));
-        String conceptTag = normalizeWhitespace(node.path("conceptTag").asText());
-        String understandingLevel = normalizeWhitespace(node.path("understandingLevel").asText());
 
-        if (question.isBlank()) {
-            return null;
-        }
-        if (modelAnswer.isBlank()) {
-            modelAnswer = !correctAnswer.isBlank() ? correctAnswer : sourceEvidence;
-        }
-        if (modelAnswer.isBlank()) {
-            modelAnswer = explanation;
-        }
-        if (modelAnswer.isBlank()) {
-            modelAnswer = question;
-        }
-        if (correctAnswer.isBlank()) {
-            correctAnswer = modelAnswer;
-        }
-        if (explanation.isBlank()) {
-            explanation = sourceEvidence.isBlank() ? modelAnswer : sourceEvidence;
-        }
-        if (modelAnswer.isBlank() || correctAnswer.isBlank()) {
-            return null;
-        }
+            String question = normalizeWhitespace(node.path("question").asText());
+            String correctAnswer = normalizeWhitespace(node.path("correctAnswer").asText());
+            String modelAnswer = normalizeWhitespace(node.path("modelAnswer").asText());
+            if (modelAnswer.isBlank()) {
+                modelAnswer = normalizeWhitespace(node.path("answer").asText());
+            }
+            String explanation = normalizeWhitespace(node.path("explanation").asText());
+            String sourceEvidence = normalizeWhitespace(node.path("sourceEvidence").asText());
+            String difficulty = normalizeWhitespace(node.path("difficulty").asText("medium"));
+            String conceptTag = normalizeWhitespace(node.path("conceptTag").asText());
+            String understandingLevel = normalizeWhitespace(node.path("understandingLevel").asText());
 
-        if ("multiple_choice".equals(type) && choices.size() != 4) {
-            type = "short_answer";
-            choices = List.of();
-        }
-        if ("ox".equals(type)) {
-            choices = List.of("O", "X");
-            question = buildOxQuestionText(question, selectOxStatementSource(question, modelAnswer, explanation, sourceEvidence));
-            correctAnswer = "O";
-        }
-        if ("short_answer".equals(type)) {
-            choices = List.of();
-        }
+            if (question.isBlank()) {
+                return null;
+            }
+            if (modelAnswer.isBlank()) {
+                modelAnswer = !correctAnswer.isBlank() ? correctAnswer : sourceEvidence;
+            }
+            if (modelAnswer.isBlank()) {
+                modelAnswer = explanation;
+            }
+            if (modelAnswer.isBlank()) {
+                modelAnswer = question;
+            }
+            if (correctAnswer.isBlank()) {
+                correctAnswer = modelAnswer;
+            }
+            if (explanation.isBlank()) {
+                explanation = sourceEvidence.isBlank() ? modelAnswer : sourceEvidence;
+            }
+            if (modelAnswer.isBlank() || correctAnswer.isBlank()) {
+                return null;
+            }
+
+            if ("multiple_choice".equals(type) && choices.size() != 4) {
+                type = "short_answer";
+                choices = List.of();
+            }
+            if ("ox".equals(type)) {
+                choices = List.of("O", "X");
+                question = buildOxQuestionText(question, selectOxStatementSource(question, modelAnswer, explanation, sourceEvidence));
+
+                String normalizedOxAnswer = normalizeOxAnswer(correctAnswer);
+                correctAnswer = normalizedOxAnswer.isBlank() ? "O" : normalizedOxAnswer;
+            }
+
+
+            if ("short_answer".equals(type)) {
+                choices = List.of();
+            }
 
         return new RagGeneratedQuestionResponse(
                 order,
@@ -1661,6 +1714,20 @@ public class RagService {
                 conceptTag.isBlank() ? inferConceptTag(question, sourceEvidence, modelAnswer) : conceptTag,
                 normalizeUnderstandingLevel(understandingLevel, type, question)
         );
+    }
+
+    private String normalizeOxAnswer(String answer) {
+        String normalized = normalizeWhitespace(answer).toUpperCase(Locale.ROOT);
+
+        if (normalized.equals("O") || normalized.equals("TRUE") || normalized.equals("맞다") || normalized.equals("참")) {
+            return "O";
+        }
+
+        if (normalized.equals("X") || normalized.equals("FALSE") || normalized.equals("틀리다") || normalized.equals("거짓")) {
+            return "X";
+        }
+
+        return "";
     }
 
     private String extractJsonObject(String response) {
@@ -1678,6 +1745,9 @@ public class RagService {
 
     private String buildOxQuestionText(String question, String modelAnswer) {
         String statement = normalizeWhitespace(modelAnswer);
+        statement = stripLeadingOxMarker(statement);
+
+
         if (statement.isBlank()) {
             statement = normalizeWhitespace(question);
         }
@@ -1699,6 +1769,12 @@ public class RagService {
         }
         return "다음 설명이 맞으면 O, 틀리면 X를 고르세요.\n\"" + statement + "\"";
     }
+
+    private String stripLeadingOxMarker(String value) {
+        return normalizeWhitespace(value)
+            .replaceAll("^(O|X|TRUE|FALSE|참|거짓|맞다|틀리다)\\s*[.)．:]\\s*", "")
+            .trim();
+}
 
     private String selectOxStatementSource(RagGeneratedQuestionResponse question) {
         return selectOxStatementSource(
@@ -1735,6 +1811,7 @@ public class RagService {
                 || compact.length() < 6;
     }
 
+
     private String normalizeQuestionType(String type) {
         String normalized = type == null ? "" : type.trim().toLowerCase(Locale.ROOT);
         return switch (normalized) {
@@ -1748,11 +1825,11 @@ public class RagService {
         return new RagGeneratedQuestionResponse(
                 order,
                 "short_answer",
-                evidence.concept() + " 개념을 설명하세요.",
+                evidence.concept() + "의 의미를 설명하고, 문서에서 제시된 특징이나 예시와 연결해서 서술하세요.",
                 List.of(),
                 evidence.explanation(),
                 evidence.explanation(),
-                evidence.concept() + "의 정의와 역할을 설명할 수 있어야 문서 내용을 이해한 것입니다.",
+                evidence.concept() + "의 정의뿐 아니라 역할, 특징, 예시 중 하나 이상을 함께 설명해야 합니다.",
                 evidence.explanation(),
                 "medium",
                 evidence.concept(),

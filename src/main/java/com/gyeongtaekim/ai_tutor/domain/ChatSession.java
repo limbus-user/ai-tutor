@@ -62,6 +62,11 @@ public class ChatSession {
         this.updatedAt = LocalDateTime.now();
     }
 
+    public void updateTitle(String title) {
+        this.title = title;
+        this.updatedAt = LocalDateTime.now();
+    }
+
     public void close() {
         this.status = SessionStatus.CLOSED;
         this.updatedAt = LocalDateTime.now();

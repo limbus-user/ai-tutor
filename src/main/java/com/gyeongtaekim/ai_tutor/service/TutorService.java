@@ -125,7 +125,7 @@ public class TutorService {
 
     private String buildFallbackAnswer(RagQueryResponse ragResponse) {
         String conciseAnswer = ragResponse.getAnswer() == null ? "" : ragResponse.getAnswer().trim();
-        conciseAnswer = trimToSentenceLimit(conciseAnswer, 4);
+        conciseAnswer = trimToSentenceLimit(conciseAnswer, 8);
         return conciseAnswer + "\n\n출처:\n" + String.join("\n", ragResponse.getSources());
     }
 
@@ -139,7 +139,9 @@ public class TutorService {
         prompt.append("You are a grounded AI tutor.\n");
         prompt.append("Answer only from the provided evidence.\n");
         prompt.append("If the evidence is insufficient, say so clearly.\n");
-        prompt.append("Keep the explanation accurate and concise.\n\n");
+        prompt.append("Explain like a patient university tutor.\n");
+        prompt.append("Use the provided evidence as the main basis, but make the explanation easy to understand.\n");
+        prompt.append("When helpful, include definitions, step-by-step reasoning, comparisons, and simple examples that are consistent with the evidence.\n\n");
 
         if (memory != null) {
             prompt.append("[Learning Memory]\n");
@@ -162,9 +164,11 @@ public class TutorService {
         prompt.append("[Instructions]\n");
         prompt.append("1. Answer in Korean.\n");
         prompt.append("2. Use only the evidence above.\n");
-        prompt.append("3. Keep it to 2 to 4 sentences unless the user explicitly asks for more detail.\n");
-        prompt.append("4. Do not add trivia, extra background, or unrelated examples.\n");
-        prompt.append("5. Do not include a source list or citation heading in the body.\n");
+        prompt.append("3. If the question asks for explanation, answer in 5 to 8 sentences with clear structure.\n");
+        prompt.append("4. Start with the core answer, then explain why using the evidence.\n");
+        prompt.append("5. Include a simple example or comparison when it helps understanding, but do not invent facts outside the evidence.\n");
+        prompt.append("6. If the evidence is limited, clearly say what is confirmed and what is not confirmed.\n");
+        prompt.append("7. Do not include a source list or citation heading in the body.\n");
         return prompt.toString();
     }
 
@@ -179,7 +183,7 @@ public class TutorService {
         cleaned = cleaned.replaceAll("(?is)\\n*출처\\s*:\\s*.*$", "");
         cleaned = cleaned.replaceAll("(?im)^\\s*-\\s*.+\\[chunk\\s+\\d+\\]\\s*$", "");
         cleaned = cleaned.replaceAll("\\n{3,}", "\n\n").trim();
-        return trimToSentenceLimit(cleaned, 4);
+        return trimToSentenceLimit(cleaned, 8);
     }
 
     private String trimToSentenceLimit(String text, int sentenceLimit) {

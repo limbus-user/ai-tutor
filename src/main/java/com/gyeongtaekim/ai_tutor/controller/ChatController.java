@@ -4,12 +4,14 @@ import com.gyeongtaekim.ai_tutor.dto.ChatMessageCreateRequest;
 import com.gyeongtaekim.ai_tutor.dto.ChatMessageResponse;
 import com.gyeongtaekim.ai_tutor.dto.ChatSessionCreateRequest;
 import com.gyeongtaekim.ai_tutor.dto.ChatSessionResponse;
+import com.gyeongtaekim.ai_tutor.dto.ChatSessionTitleUpdateRequest;
 import com.gyeongtaekim.ai_tutor.service.ChatService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -56,6 +58,14 @@ public class ChatController {
     @PostMapping("/sessions/{sessionId}/close")
     public ResponseEntity<ChatSessionResponse> closeSession(@PathVariable Long sessionId) {
         return ResponseEntity.ok(chatService.closeSession(sessionId));
+    }
+
+    @PatchMapping("/sessions/{sessionId}")
+    public ResponseEntity<ChatSessionResponse> updateSessionTitle(
+            @PathVariable Long sessionId,
+            @RequestBody ChatSessionTitleUpdateRequest request
+    ) {
+        return ResponseEntity.ok(chatService.updateSessionTitle(sessionId, request));
     }
 
     @DeleteMapping("/sessions/{sessionId}")

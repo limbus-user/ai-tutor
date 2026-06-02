@@ -15,6 +15,13 @@ const state = {
   quizSession: null,
   openQuizSetMenuId: null,
   openDocumentMenuId: null,
+  openSessionMenuId: null,
+  homeSessionFilter: "recent",
+  homeSessionSearch: "",
+  homeSessionPage: 1,
+  homeQuizCount: 0,
+  homeMessageCount: 0,
+  homeRecentMessages: [],
 };
 
 const views = {
@@ -108,6 +115,11 @@ function clearAuth() {
   state.quizSession = null;
   state.openQuizSetMenuId = null;
   state.openDocumentMenuId = null;
+  state.openSessionMenuId = null;
+  state.homeSessionPage = 1;
+  state.homeQuizCount = 0;
+  state.homeMessageCount = 0;
+  state.homeRecentMessages = [];
   saveAuth();
   renderDevModeLogs();
 }
@@ -231,21 +243,118 @@ function renderSessionList() {
   const container = document.getElementById("session-list");
   container.innerHTML = "";
 
-  const studySessions = state.sessions.filter((session) => (session.type || "STUDY") === "STUDY");
+  const studySessions = state.sessions
+    .filter((session) => (session.type || "STUDY") === "STUDY")
+    .filter((session) => state.homeSessionFilter !== "active" || (session.status || "ACTIVE") === "ACTIVE")
+    .filter((session) => session.title.toLowerCase().includes(state.homeSessionSearch.toLowerCase()))
+    .sort((a, b) => state.homeSessionFilter === "recent"
+      ? new Date(b.updatedAt) - new Date(a.updatedAt)
+      : a.id - b.id);
+
+  document.getElementById("session-visible-count").textContent = String(studySessions.length);
+  const pageSize = 7;
+  const pageCount = Math.max(1, Math.ceil(studySessions.length / pageSize));
+  state.homeSessionPage = Math.min(state.homeSessionPage, pageCount);
+  const visibleSessions = studySessions.slice(
+    (state.homeSessionPage - 1) * pageSize,
+    state.homeSessionPage * pageSize,
+  );
+  renderSessionPagination(pageCount);
 
   if (!studySessions.length) {
-    container.innerHTML = '<div class="empty-box">아직 만든 세션이 없습니다.</div>';
+    container.innerHTML = '<div class="empty-box">조건에 맞는 세션이 없습니다.</div>';
+    renderHomeDashboard();
     return;
   }
 
-  studySessions.forEach((session) => {
+  visibleSessions.forEach((session) => {
     const fragment = sessionItemTemplate.content.cloneNode(true);
+    const status = session.status || "ACTIVE";
     fragment.querySelector(".session-title").textContent = session.title;
     fragment.querySelector(".session-meta").textContent =
-      `sessionId ${session.id} · ${session.status} · ${new Date(session.updatedAt).toLocaleString("ko-KR")}`;
+      `sessionId ${session.id} · ${new Date(session.updatedAt).toLocaleString("ko-KR")}`;
+    const statusElement = fragment.querySelector(".session-status");
+    statusElement.textContent = status === "ACTIVE" ? "ACTIVE" : "완료";
+    statusElement.classList.toggle("complete", status !== "ACTIVE");
     fragment.querySelector(".open-session-button").addEventListener("click", () => void openExistingSession(session.id));
+    const menu = fragment.querySelector(".session-menu");
+    menu.classList.toggle("hidden", state.openSessionMenuId !== session.id);
+    fragment.querySelector(".session-more-button").addEventListener("click", (event) => {
+      event.stopPropagation();
+      state.openSessionMenuId = state.openSessionMenuId === session.id ? null : session.id;
+      renderSessionList();
+    });
+    fragment.querySelector(".rename-session-button").addEventListener("click", () => void renameSession(session));
     fragment.querySelector(".delete-session-button").addEventListener("click", () => void deleteSession(session.id));
     container.appendChild(fragment);
+  });
+
+  renderHomeDashboard();
+}
+
+function renderSessionPagination(pageCount) {
+  const container = document.getElementById("session-pagination");
+  container.innerHTML = "";
+
+  const appendButton = (label, page, options = {}) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `pagination-button${options.active ? " active" : ""}`;
+    button.textContent = label;
+    button.disabled = options.disabled || false;
+    button.setAttribute("aria-label", options.ariaLabel || `${page}페이지`);
+    button.addEventListener("click", () => {
+      state.homeSessionPage = page;
+      renderSessionList();
+    });
+    container.appendChild(button);
+  };
+
+  appendButton("‹", Math.max(1, state.homeSessionPage - 1), {
+    disabled: state.homeSessionPage === 1,
+    ariaLabel: "이전 페이지",
+  });
+  for (let page = 1; page <= pageCount; page += 1) {
+    appendButton(String(page), page, { active: page === state.homeSessionPage });
+  }
+  appendButton("›", Math.min(pageCount, state.homeSessionPage + 1), {
+    disabled: state.homeSessionPage === pageCount,
+    ariaLabel: "다음 페이지",
+  });
+}
+
+function renderHomeDashboard() {
+  const studySessions = state.sessions.filter((session) => (session.type || "STUDY") === "STUDY");
+
+  document.getElementById("stat-session-count").textContent = String(studySessions.length);
+  document.getElementById("stat-document-count").textContent = String(state.documentsCatalog.length);
+  document.getElementById("stat-quiz-count").textContent = String(state.homeQuizCount);
+  document.getElementById("stat-message-count").textContent = String(state.homeMessageCount);
+
+  const recentContainer = document.getElementById("recent-session-list");
+  recentContainer.innerHTML = "";
+  if (!state.homeRecentMessages.length) {
+    recentContainer.innerHTML = '<div class="empty-box">최근 대화 기록이 없습니다.</div>';
+    return;
+  }
+
+  state.homeRecentMessages.forEach((message) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "recent-session-item";
+    button.innerHTML = `
+      <span class="recent-session-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12a2 2 0 0 1 2 2v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a2 2 0 0 1 2-2Z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span>
+      <span class="recent-session-copy">
+        <strong></strong>
+        <small></small>
+      </span>
+      <span class="recent-session-arrow"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></span>
+    `;
+    button.querySelector("strong").textContent = message.sessionTitle;
+    button.querySelector("small").textContent =
+      `${message.content} · ${formatRelativeTime(message.createdAt)}`;
+    button.addEventListener("click", () => void openExistingSession(message.sessionId));
+    recentContainer.appendChild(button);
   });
 }
 
@@ -254,6 +363,7 @@ function renderWorkspaceHeader() {
 
   document.getElementById("workspace-title").textContent = state.currentSession.title;
   document.getElementById("workspace-subtitle").textContent = `sessionId ${state.currentSession.id} · ${state.userName}`;
+  document.getElementById("workspace-status").textContent = state.currentSession.status || "ACTIVE";
 
   const selectedIds = getSelectedQuizDocumentIds();
   const selectedDocuments = (state.currentWorkspace?.documents || [])
@@ -262,6 +372,7 @@ function renderWorkspaceHeader() {
   document.getElementById("current-document-badge").textContent = selectedDocuments.length
       ? `선택 PDF ${selectedDocuments.length}개`
       : "문서 미선택";
+  document.getElementById("selected-document-footer").textContent = `선택된 파일 ${selectedDocuments.length}개`;
 }
 
 function getSelectedQuizDocumentIds() {
@@ -276,9 +387,33 @@ function renderQuizDocumentSelection() {
   const titles = (state.currentWorkspace?.documents || [])
     .filter((documentInfo) => selectedIds.includes(documentInfo.documentId))
     .map((documentInfo) => documentInfo.title);
-  element.textContent = titles.length
-    ? `출제 PDF ${titles.length}개 선택: ${titles.join(", ")}`
-    : "출제 PDF를 선택해 주세요.";
+  element.innerHTML = "";
+  if (!titles.length) {
+    element.textContent = "출제 PDF를 선택해 주세요.";
+    return;
+  }
+
+  const heading = document.createElement("strong");
+  heading.textContent = `선택된 PDF (${titles.length}개)`;
+  const header = document.createElement("div");
+  header.className = "quiz-document-selection-header";
+  header.appendChild(heading);
+  const editButton = document.createElement("button");
+  editButton.type = "button";
+  editButton.textContent = "편집";
+  editButton.addEventListener("click", () => document.getElementById("document-list").scrollIntoView({ behavior: "smooth" }));
+  header.appendChild(editButton);
+  element.appendChild(header);
+  const chips = document.createElement("div");
+  chips.className = "quiz-document-chips";
+  titles.forEach((title) => {
+    const chip = document.createElement("span");
+    chip.className = "quiz-document-chip";
+    chip.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/><path d="M14 3v6h6"/></svg>';
+    chip.append(title);
+    chips.appendChild(chip);
+  });
+  element.appendChild(chips);
 }
 
 function renderDocuments() {
@@ -286,6 +421,7 @@ function renderDocuments() {
   container.innerHTML = "";
 
   const documents = state.currentWorkspace?.documents || [];
+  document.getElementById("uploaded-document-count").textContent = `업로드된 파일 ${documents.length}개`;
   if (!documents.length) {
     container.innerHTML = '<div class="empty-box">업로드된 PDF가 없습니다.</div>';
     renderWorkspaceHeader();
@@ -310,8 +446,17 @@ function renderDocuments() {
     selectedIndicator.setAttribute("aria-pressed", String(selectedForQuiz));
     menu.classList.toggle("hidden", state.openDocumentMenuId !== documentInfo.documentId);
     fragment.querySelector(".document-name").textContent = documentInfo.title;
-    fragment.querySelector(".document-meta").textContent =
-      `${documentInfo.subject || "-"} / ${documentInfo.unitName || "-"} / ${documentInfo.trustLevel || "-"}`;
+    const metaTags = fragment.querySelector(".document-meta-tags");
+    [documentInfo.subject, documentInfo.unitName, documentInfo.trustLevel]
+      .filter(Boolean)
+      .forEach((value) => {
+        const tag = document.createElement("span");
+        tag.textContent = value;
+        metaTags.appendChild(tag);
+      });
+    fragment.querySelector(".document-uploaded-at").textContent = documentInfo.createdAt
+      ? `업로드 ${new Date(documentInfo.createdAt).toLocaleString("ko-KR", { dateStyle: "short", timeStyle: "short" })}`
+      : "";
 
     openButton.addEventListener("click", () => {
       const selectedIds = getSelectedQuizDocumentIds();
@@ -459,6 +604,9 @@ function renderMessages() {
     const isUser = message.role === "USER";
     card.classList.add(isUser ? "user" : "assistant");
     fragment.querySelector(".message-role").textContent = isUser ? "나" : "튜터";
+    fragment.querySelector(".message-avatar").innerHTML = isUser
+      ? '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>'
+      : '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="6" width="14" height="12" rx="4"/><path d="M12 3v3M9 11h.01M15 11h.01M9 15h6"/></svg>';
     fragment.querySelector(".message-content").textContent = message.content;
     const sourceElement = fragment.querySelector(".message-source");
     if (message.sourceReferences) {
@@ -509,6 +657,7 @@ function renderQuizSets() {
     const menu = fragment.querySelector(".quiz-set-menu");
     const renameButton = fragment.querySelector(".rename-quiz-set-button");
     const deleteButton = fragment.querySelector(".delete-quiz-set-button");
+    fragment.querySelector(".quiz-set-icon").classList.add(`quiz-set-icon-${index % 4}`);
 
     fragment.querySelector(".quiz-set-title").textContent = quizSet.quizSetTitle || `퀴즈 세트 ${index + 1}`;
     fragment.querySelector(".quiz-set-meta").textContent =
@@ -1148,6 +1297,7 @@ function inferDocumentsForSession(messages, quizzes) {
       subject: matched.subject,
       unitName: matched.unitName,
       trustLevel: matched.trustLevel,
+      createdAt: matched.createdAt,
     });
     knownIds.add(matched.id);
   });
@@ -1162,6 +1312,7 @@ function inferDocumentsForSession(messages, quizzes) {
       subject: matched.subject,
       unitName: matched.unitName,
       trustLevel: matched.trustLevel,
+      createdAt: matched.createdAt,
     });
     knownIds.add(matched.id);
   });
@@ -1180,6 +1331,7 @@ async function pingServer() {
 
 async function fetchDocumentsCatalog() {
   state.documentsCatalog = await apiFetch("/api/rag/documents");
+  renderHomeDashboard();
 }
 
 async function fetchSessions() {
@@ -1187,11 +1339,51 @@ async function fetchSessions() {
   renderSessionList();
 }
 
+async function fetchHomeActivityMetrics() {
+  const studySessions = state.sessions.filter((session) => (session.type || "STUDY") === "STUDY");
+  const results = await Promise.allSettled(
+    studySessions.map(async (session) => {
+      const [messages, quizzes] = await Promise.all([
+        apiFetch(`/api/chat/sessions/${session.id}/messages`),
+        apiFetch(`/api/chat/sessions/${session.id}/quizzes`),
+      ]);
+      return {
+        messageCount: messages.length,
+        quizCount: quizzes.length,
+        messages,
+        session,
+      };
+    }),
+  );
+
+  state.homeMessageCount = 0;
+  state.homeQuizCount = 0;
+  state.homeRecentMessages = [];
+  results.forEach((result) => {
+    if (result.status !== "fulfilled") return;
+    state.homeMessageCount += result.value.messageCount;
+    state.homeQuizCount += result.value.quizCount;
+    result.value.messages
+      .filter((message) => message.role === "USER")
+      .forEach((message) => {
+        state.homeRecentMessages.push({
+          ...message,
+          sessionTitle: result.value.session.title,
+        });
+      });
+  });
+  state.homeRecentMessages = state.homeRecentMessages
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .slice(0, 3);
+  renderHomeDashboard();
+}
+
 async function loadHome() {
   renderHomeHeader();
-  document.getElementById("history-panel").classList.add("hidden");
   await Promise.all([fetchDocumentsCatalog(), fetchSessions()]);
+  renderHomeDashboard();
   showView("home");
+  void fetchHomeActivityMetrics();
 }
 
 async function openExistingSession(sessionId) {
@@ -1239,9 +1431,29 @@ async function deleteSession(sessionId) {
       state.currentMessages = [];
       state.currentWorkspace = null;
     }
+    state.openSessionMenuId = null;
     await fetchSessions();
+    await fetchHomeActivityMetrics();
   } catch (error) {
     alert(formatErrorMessage(error, "세션을 삭제하지 못했습니다."));
+  }
+}
+
+async function renameSession(session) {
+  const nextTitle = window.prompt("새 세션 이름을 입력해 주세요.", session.title || "");
+  if (nextTitle === null) return;
+
+  try {
+    await apiFetch(`/api/chat/sessions/${session.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: nextTitle }),
+    });
+    state.openSessionMenuId = null;
+    await fetchSessions();
+    await fetchHomeActivityMetrics();
+  } catch (error) {
+    alert(formatErrorMessage(error, "세션 이름을 바꾸지 못했습니다."));
   }
 }
 
@@ -1289,6 +1501,7 @@ async function createNewStudy(event) {
         subject: document.getElementById("new-study-subject").value,
         unitName: document.getElementById("new-study-unit").value,
         trustLevel: document.getElementById("new-study-trust").value,
+        createdAt: state.documentsCatalog.find((documentInfo) => documentInfo.id === uploadResponse.documentId)?.createdAt,
       }],
       quizzes: [],
       currentDocumentId: uploadResponse.documentId,
@@ -1336,6 +1549,7 @@ async function uploadWorkspacePdf(event) {
       subject: document.getElementById("workspace-subject").value,
       unitName: document.getElementById("workspace-unit").value,
       trustLevel: document.getElementById("workspace-trust").value,
+      createdAt: new Date().toISOString(),
     });
 
     state.currentWorkspace.selectedQuizDocumentIds = [
@@ -1545,11 +1759,34 @@ document.getElementById("back-workspace-button").addEventListener("click", () =>
 document.getElementById("start-new-study-button").addEventListener("click", () => {
   document.getElementById("new-study-form").classList.toggle("hidden");
 });
-document.getElementById("show-history-button").addEventListener("click", async () => {
-  document.getElementById("history-panel").classList.remove("hidden");
-  await fetchSessions();
+document.getElementById("session-search").addEventListener("input", (event) => {
+  state.homeSessionSearch = event.currentTarget.value.trim();
+  state.homeSessionPage = 1;
+  renderSessionList();
 });
-document.getElementById("refresh-sessions-button").addEventListener("click", async () => void fetchSessions());
+document.querySelectorAll(".session-filter").forEach((button) => {
+  button.addEventListener("click", () => {
+    state.homeSessionFilter = button.dataset.sessionFilter;
+    state.homeSessionPage = 1;
+    document.querySelectorAll(".session-filter").forEach((filterButton) => {
+      filterButton.classList.toggle("active", filterButton === button);
+    });
+    renderSessionList();
+  });
+});
+document.getElementById("show-history-button").addEventListener("click", async () => {
+  state.homeSessionFilter = "all";
+  state.homeSessionPage = 1;
+  document.querySelectorAll(".session-filter").forEach((button) => {
+    button.classList.toggle("active", button.dataset.sessionFilter === "all");
+  });
+  await fetchSessions();
+  await fetchHomeActivityMetrics();
+});
+document.getElementById("refresh-sessions-button").addEventListener("click", async () => {
+  await fetchSessions();
+  await fetchHomeActivityMetrics();
+});
 document.getElementById("new-study-form").addEventListener("submit", (event) => void createNewStudy(event));
 document.getElementById("workspace-upload-form").addEventListener("submit", (event) => void uploadWorkspacePdf(event));
 document.getElementById("chat-form").addEventListener("submit", (event) => void sendChat(event));
@@ -1565,6 +1802,10 @@ document.addEventListener("click", (event) => {
   if (!event.target.closest(".document-row") && state.openDocumentMenuId) {
     state.openDocumentMenuId = null;
     renderDocuments();
+  }
+  if (!event.target.closest(".session-card") && state.openSessionMenuId) {
+    state.openSessionMenuId = null;
+    renderSessionList();
   }
 });
 

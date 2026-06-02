@@ -99,7 +99,7 @@ public class SessionQuizService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Quiz not found"));
 
         String submittedAnswer = request.getSubmittedAnswer().trim();
-        boolean correct = normalize(submittedAnswer).equals(normalize(quiz.getCorrectAnswer()));
+        boolean correct = isCorrectQuizAnswer(quiz, submittedAnswer);
         quiz.submitResult(submittedAnswer, correct, buildEvaluationFeedback(quiz, submittedAnswer, correct));
 
         return new SessionQuizResponse(sessionQuizRepository.save(quiz));
@@ -175,6 +175,97 @@ public class SessionQuizService {
 
     private String normalize(String value) {
         return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private boolean isCorrectQuizAnswer(SessionQuiz quiz, String submittedAnswer) {
+        String expected = normalizeForGrading(quiz.getCorrectAnswer());
+        String submitted = normalizeForGrading(submittedAnswer);
+
+        if (expected.isBlank() || submitted.isBlank()) {
+            return false;
+        }
+
+        String type = normalize(quiz.getType());
+
+        // 객관식, OX는 기존처럼 정확히 일치해야 정답
+        if ("multiple_choice".equals(type)
+                || "multiple-choice".equals(type)
+                || "true_false".equals(type)
+                || "true-false".equals(type)
+                || "ox".equals(type)) {
+            return expected.equals(submitted);
+        }
+
+        // 주관식은 완전 일치, 포함 관계, 핵심어 유사도 기준으로 채점
+        if (expected.equals(submitted)
+                || expected.contains(submitted)
+                || submitted.contains(expected)) {
+            return true;
+        }
+
+        String modelAnswer = normalizeForGrading(quiz.getModelAnswer());
+        if (!modelAnswer.isBlank() && submitted.contains(modelAnswer)) {
+            return true;
+        }
+
+        return isSimilarSubjectiveAnswer(expected + " " + modelAnswer, submitted);
+    }
+
+    private boolean isSimilarSubjectiveAnswer(String expected, String submitted) {
+        List<String> expectedKeywords = extractMeaningfulTokens(expected);
+        List<String> submittedKeywords = extractMeaningfulTokens(submitted);
+
+        if (expectedKeywords.isEmpty() || submittedKeywords.isEmpty()) {
+            return false;
+        }
+
+        // 너무 짧은 단답은 주관식 정답으로 인정하지 않음
+        // 예: "배열, 트리" 같은 키워드 나열 방지
+        if (submittedKeywords.size() < 3) {
+            return false;
+        }
+
+        long matchedCount = expectedKeywords.stream()
+                .filter(expectedToken ->
+                        submittedKeywords.stream().anyMatch(submittedToken ->
+                                submittedToken.contains(expectedToken)
+                                        || expectedToken.contains(submittedToken)
+                        )
+                )
+                .count();
+
+        double matchRatio = (double) matchedCount / expectedKeywords.size();
+
+        return matchRatio >= 0.5;
+    }
+
+    private List<String> extractMeaningfulTokens(String text) {
+        return Arrays.stream(text.split("[\\s,.;:()\\[\\]{}\"'“”‘’]+"))
+                .map(String::trim)
+                .filter(token -> token.length() >= 2)
+                .filter(token -> !isStopWord(token))
+                .distinct()
+                .toList();
+    }
+
+    private boolean isStopWord(String token) {
+        return List.of(
+                "그리고", "또는", "하지만", "그러나", "따라서",
+                "이다", "한다", "있는", "없는", "것은", "것을", "것이",
+                "이를", "이것", "저것", "해당", "대한", "위한",
+                "수", "등", "및"
+        ).contains(token);
+    }
+
+    private String normalizeForGrading(String value) {
+        if (value == null) {
+            return "";
+        }
+
+        return value
+                .trim()
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("\\s+", " ");
     }
 
     private String buildEvaluationFeedback(SessionQuiz quiz, String submittedAnswer, boolean correct) {

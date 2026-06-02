@@ -63,10 +63,19 @@ public class ProblemService {
         User user = userRepository.findById(request.getUserId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
 
-        boolean correct = normalize(problem.getAnswer()).equals(normalize(request.getSubmittedAnswer()));
+        boolean correct = isCorrectAnswer(problem, request.getSubmittedAnswer());
+
+        System.out.println("[submitAnswer 호출됨]");
+        System.out.println("[문제 ID] " + problemId);
+        System.out.println("[문제 타입] " + problem.getType());
+        System.out.println("[모범답안] " + problem.getAnswer());
+        System.out.println("[제출답안] " + request.getSubmittedAnswer());
+        System.out.println("[최종 채점결과] " + correct);
+
+
         String feedback = correct
-                ? "정답입니다. " + problem.getExplanation()
-                : "오답입니다. 정답은 '" + problem.getAnswer() + "' 입니다. " + problem.getExplanation();
+                ? "정답입니다. 핵심 의미가 모범답안과 일치합니다. " + problem.getExplanation()
+                : "오답입니다. 모범답안의 핵심 내용은 '" + problem.getAnswer() + "' 입니다. " + problem.getExplanation();
 
         UserProblemAttempt attempt = new UserProblemAttempt(
                 user,
@@ -82,6 +91,90 @@ public class ProblemService {
         }
 
         return new ProblemSubmissionResponse(savedAttempt);
+    }
+
+    private boolean isCorrectAnswer(Problem problem, String submittedAnswer) {
+        String expected = normalizeForGrading(problem.getAnswer());
+        String submitted = normalizeForGrading(submittedAnswer);
+
+        if (expected.isBlank() || submitted.isBlank()) {
+            return false;
+        }
+
+        // 객관식, OX는 정확히 일치해야 정답
+        if (problem.getType() == Problem.ProblemType.MULTIPLE_CHOICE
+                || problem.getType() == Problem.ProblemType.TRUE_FALSE) {
+            return expected.equals(submitted);
+        }
+
+        // 주관식: 완전 일치 또는 서로 포함하면 정답
+        if (expected.equals(submitted)
+                || expected.contains(submitted)
+                || submitted.contains(expected)) {
+            return true;
+        }
+
+
+
+        boolean similar = isSimilarSubjectiveAnswer(expected, submitted);
+
+        System.out.println("[채점 타입] " + problem.getType());
+        System.out.println("[모범답안] " + problem.getAnswer());
+        System.out.println("[제출답안] " + submittedAnswer);
+        System.out.println("[채점결과] " + similar);
+
+        return similar;
+    }
+
+    private boolean isSimilarSubjectiveAnswer(String expected, String submitted) {
+        List<String> expectedKeywords = extractMeaningfulTokens(expected);
+        List<String> submittedKeywords = extractMeaningfulTokens(submitted);
+
+        if (expectedKeywords.isEmpty() || submittedKeywords.isEmpty()) {
+            return false;
+        }
+
+        long matchedCount = expectedKeywords.stream()
+                .filter(expectedToken ->
+                        submittedKeywords.stream().anyMatch(submittedToken ->
+                                submittedToken.contains(expectedToken)
+                                        || expectedToken.contains(submittedToken)
+                        )
+                )
+                .count();
+
+        double matchRatio = (double) matchedCount / expectedKeywords.size();
+
+        return matchRatio >= 0.35;
+    }
+
+    private List<String> extractMeaningfulTokens(String text) {
+        return java.util.Arrays.stream(text.split("[\\s,.;:()\\[\\]{}\"'“”‘’]+"))
+                .map(String::trim)
+                .filter(token -> token.length() >= 2)
+                .filter(token -> !isStopWord(token))
+                .distinct()
+                .toList();
+    }
+
+    private boolean isStopWord(String token) {
+        return List.of(
+                "그리고", "또는", "하지만", "그러나", "따라서",
+                "이다", "한다", "있는", "없는", "것은", "것을", "것이",
+                "이를", "이것", "저것", "해당", "대한", "위한",
+                "수", "등", "및"
+        ).contains(token);
+    }
+
+    private String normalizeForGrading(String value) {
+        if (value == null) {
+            return "";
+        }
+
+        return value
+                .trim()
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("\\s+", " ");
     }
 
     private String normalize(String value) {

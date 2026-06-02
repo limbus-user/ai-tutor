@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Tutor</title>
-    <link rel="stylesheet" href="/app.css?v=20260602-2">
+    <link rel="stylesheet" href="/app.css?v=20260603-workspace-3">
 </head>
 <body>
 <div class="app-shell">
@@ -73,77 +73,120 @@
             </div>
         </header>
 
-        <main class="home-grid">
-            <article class="home-card">
-                <h2>새 공부 하기</h2>
-                <p>PDF를 업로드하고 새 세션을 만들어 바로 학습 워크스페이스로 이동합니다.</p>
-                <button id="start-new-study-button" type="button">새 공부 시작</button>
+        <main class="home-dashboard">
+            <section class="dashboard-stats" aria-label="학습 현황">
+                <article class="stat-card">
+                    <div class="stat-icon stat-icon-blue"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12a2 2 0 0 1 2 2v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a2 2 0 0 1 2-2Z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></div>
+                    <div><p>전체 세션</p><strong><span id="stat-session-count">0</span><small> 개</small></strong><span>누적 생성 세션</span></div>
+                </article>
+                <article class="stat-card">
+                    <div class="stat-icon stat-icon-green"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg></div>
+                    <div><p>업로드 문서</p><strong><span id="stat-document-count">0</span><small> 개</small></strong><span>PDF 파일 업로드</span></div>
+                </article>
+                <article class="stat-card">
+                    <div class="stat-icon stat-icon-purple"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 14.4 9.6 21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4Z"/></svg></div>
+                    <div><p>생성된 퀴즈</p><strong><span id="stat-quiz-count">0</span><small> 개</small></strong><span>AI 생성 퀴즈</span></div>
+                </article>
+                <article class="stat-card">
+                    <div class="stat-icon stat-icon-orange"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 15a4 4 0 0 1-4 4H9l-5 3v-7a4 4 0 0 1-1-2.7V8a4 4 0 0 1 4-4h9a4 4 0 0 1 4 4Z"/><path d="M8 9h8M8 13h5"/></svg></div>
+                    <div><p>총 대화 수</p><strong><span id="stat-message-count">0</span><small> 회</small></strong><span>누적 대화 기록</span></div>
+                </article>
+            </section>
 
-                <form id="new-study-form" class="stack hidden">
-                    <label>
-                        <span>세션 제목</span>
-                        <input id="new-study-title" type="text" value="새 학습 세션" required>
+            <section class="dashboard-columns">
+                <section id="history-panel" class="home-card history-card">
+                    <div class="section-header">
+                        <div><h2>세션 목록</h2></div>
+                        <button id="refresh-sessions-button" type="button" class="icon-button" aria-label="세션 새로고침"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.9-3M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.9 3M20 20v-4h-4"/></svg></button>
+                    </div>
+                    <label class="session-search-wrap">
+                        <span aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m16 16 5 5"/></svg></span>
+                        <input id="session-search" type="search" placeholder="세션 제목으로 검색">
                     </label>
-                    <label>
-                        <span>PDF 파일</span>
-                        <input id="new-study-file" type="file" accept="application/pdf" required>
-                    </label>
-                    <label>
-                        <span>subject</span>
-                        <input id="new-study-subject" type="text" value="컴퓨터과학">
-                    </label>
-                    <label>
-                        <span>unitName</span>
-                        <input id="new-study-unit" type="text" value="알고리즘">
-                    </label>
-                    <label>
-                        <span>trustLevel</span>
-                        <input id="new-study-trust" type="text" value="높음">
-                    </label>
-                    <button type="submit">업로드 후 시작</button>
-                </form>
-            </article>
+                    <div class="session-toolbar">
+                        <div class="session-filter-row">
+                            <button type="button" class="session-filter active" data-session-filter="recent">최근순</button>
+                            <button type="button" class="session-filter" data-session-filter="all">전체</button>
+                            <button type="button" class="session-filter" data-session-filter="active">ACTIVE</button>
+                        </div>
+                        <span>총 <strong id="session-visible-count">0</strong>개</span>
+                    </div>
+                    <div id="session-list" class="session-list"></div>
+                    <nav id="session-pagination" class="session-pagination" aria-label="세션 목록 페이지"></nav>
+                </section>
 
-            <article class="home-card">
-                <h2>기존 대화 기록</h2>
-                <p>기존 세션으로 들어가서 업로드 문서, 채팅, 퀴즈를 이어서 확인합니다.</p>
-                <button id="show-history-button" type="button" class="secondary-button">기존 대화 보기</button>
-            </article>
+                <div class="dashboard-side">
+                    <article class="home-card new-study-card">
+                        <div class="section-heading-with-icon">
+                            <span class="heading-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 14.4 9.6 21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4Z"/></svg></span>
+                            <div><p class="card-kicker">NEW WORKSPACE</p><h2>새 공부 시작</h2></div>
+                        </div>
+                        <p>PDF를 업로드하고 새 세션을 만들어 바로 학습 워크스페이스로 이동합니다.</p>
+                        <button id="start-new-study-button" type="button" class="hidden">새 공부 시작</button>
+                        <form id="new-study-form" class="stack dashboard-study-form">
+                            <label><span>세션 제목</span><input id="new-study-title" type="text" value="새 학습 세션" required></label>
+                            <label><span>PDF 파일</span><input id="new-study-file" type="file" accept="application/pdf" required></label>
+                            <div class="form-grid-2">
+                                <label><span>subject</span><input id="new-study-subject" type="text" value="컴퓨터과학"></label>
+                                <label><span>unitName</span><input id="new-study-unit" type="text" value="알고리즘"></label>
+                            </div>
+                            <label>
+                                <span>trustLevel</span>
+                                <select id="new-study-trust">
+                                    <option value="높음">높음</option>
+                                    <option value="보통">보통</option>
+                                    <option value="낮음">낮음</option>
+                                </select>
+                            </label>
+                            <button type="submit" class="dashboard-submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg><span>업로드 후 시작</span></button>
+                        </form>
+                    </article>
 
-            <section id="history-panel" class="home-card history-card hidden">
-                <div class="section-header">
-                    <h2>세션 목록</h2>
-                    <button id="refresh-sessions-button" type="button" class="secondary-button">새로고침</button>
+                    <article class="home-card recent-card">
+                        <div class="section-header">
+                            <div><p class="card-kicker">RECENT ACTIVITY</p><h2>최근 대화 기록</h2></div>
+                            <span class="mini-badge">최근 3개</span>
+                        </div>
+                        <div id="recent-session-list" class="recent-session-list"></div>
+                        <button id="show-history-button" type="button" class="recent-all-button">전체 세션 보기</button>
+                    </article>
                 </div>
-                <div id="session-list" class="session-list"></div>
             </section>
         </main>
     </section>
 
     <section id="workspace-view" class="view">
-        <header class="topbar">
-            <div>
-                <p class="eyebrow">Study Workspace</p>
-                <h1 id="workspace-title">학습 세션</h1>
-                <p id="workspace-subtitle" class="workspace-subtitle"></p>
+        <div class="workspace-brand"><span class="brand-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 4c-5.2.4-9.5 2.9-11.5 7.2-1.3 2.9-.2 6.3 2.5 7.7 2.9 1.5 6.7.2 8.3-2.9 1.2-2.3.9-5-.6-6.9"/><path d="M7.5 11.2 4 8.5M14.5 7.2 13 3"/></svg></span><strong>AI TUTOR</strong></div>
+        <header class="topbar workspace-topbar">
+            <div class="workspace-title-wrap">
+                <span class="workspace-title-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 14.4 9.6 21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4Z"/></svg></span>
+                <div>
+                    <h1 id="workspace-title">학습 세션</h1>
+                    <p id="workspace-subtitle" class="workspace-subtitle"></p>
+                </div>
+                <span id="workspace-status" class="workspace-status">ACTIVE</span>
             </div>
             <div class="topbar-actions">
-                <button id="back-home-button" type="button" class="secondary-button">홈으로</button>
-                <button id="workspace-logout-button" type="button" class="secondary-button">로그아웃</button>
+                <button id="back-home-button" type="button" class="secondary-button workspace-nav-button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 11 8-7 8 7"/><path d="M6 10v10h12V10M10 20v-6h4v6"/></svg>홈으로</button>
+                <button id="workspace-logout-button" type="button" class="secondary-button workspace-nav-button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 17l5-5-5-5M15 12H3"/><path d="M14 4h5a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-5"/></svg>로그아웃</button>
             </div>
         </header>
 
         <main class="workspace-grid">
-            <aside class="workspace-panel">
+            <aside class="workspace-panel document-workspace-panel">
                 <div class="section-header">
-                    <h2>PDF 파일</h2>
+                    <h2>PDF 파일 <span class="panel-help">i</span></h2>
                 </div>
 
                 <form id="workspace-upload-form" class="stack compact-stack">
-                    <label>
+                    <label class="workspace-dropzone">
+                        <span class="dropzone-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M5 13a4 4 0 0 0 1 7h12a4 4 0 0 0 1-7"/></svg></span>
+                        <strong>PDF 파일 업로드</strong>
+                        <small>파일을 선택하거나 드래그하세요</small>
                         <span>PDF 파일</span>
                         <input id="workspace-file" type="file" accept="application/pdf" required>
                     </label>
+                    <div class="workspace-upload-options">
                     <label>
                         <span>subject</span>
                         <input id="workspace-subject" type="text" value="컴퓨터과학">
@@ -156,10 +199,13 @@
                         <span>trustLevel</span>
                         <input id="workspace-trust" type="text" value="높음">
                     </label>
-                    <button type="submit">업로드</button>
+                    </div>
+                    <button type="submit" class="workspace-upload-button">PDF 업로드</button>
                 </form>
 
+                <div class="document-list-header"><span id="uploaded-document-count">업로드된 파일</span></div>
                 <div id="document-list" class="document-list"></div>
+                <div id="selected-document-footer" class="selected-document-footer">선택된 파일 0개</div>
             </aside>
 
             <section class="workspace-panel chat-panel">
@@ -172,17 +218,20 @@
 
                 <form id="chat-form" class="chat-form">
                     <textarea id="chat-question" rows="3" placeholder="질문을 입력하세요." required></textarea>
-                    <button type="submit">보내기</button>
+                    <div class="chat-form-actions">
+                        <span class="chat-attach-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20 11.5-7.8 7.8a5 5 0 0 1-7.1-7.1l8.5-8.5a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-2.8-2.8l7.8-7.8"/></svg></span>
+                        <button type="submit">보내기 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg></button>
+                    </div>
                 </form>
             </section>
 
-            <aside class="workspace-panel">
+            <aside class="workspace-panel quiz-workspace-panel">
                 <div class="section-header">
                     <h2>퀴즈 만들기</h2>
                 </div>
 
                 <form id="quiz-form" class="stack compact-stack">
-                    <p id="quiz-document-selection" class="quiz-document-selection">출제 PDF를 선택해 주세요.</p>
+                    <div id="quiz-document-selection" class="quiz-document-selection">출제 PDF를 선택해 주세요.</div>
                     <label>
                         <span>문제 타입</span>
                         <select id="quiz-type">
@@ -196,9 +245,10 @@
                         <span>문제 개수</span>
                         <input id="quiz-count" type="number" min="3" max="10" value="3">
                     </label>
-                    <button type="submit">퀴즈 생성</button>
+                    <button type="submit" class="workspace-quiz-button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 14.4 9.6 21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4Z"/></svg>퀴즈 생성</button>
                 </form>
 
+                <div class="quiz-list-heading"><strong>최근 생성 퀴즈</strong><span>더보기</span></div>
                 <div id="quiz-list" class="quiz-list"></div>
             </aside>
         </main>
@@ -235,13 +285,21 @@
 
 <template id="session-item-template">
     <article class="session-card">
-        <div>
-            <h3 class="session-title"></h3>
+        <div class="session-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12a2 2 0 0 1 2 2v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a2 2 0 0 1 2-2Z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></div>
+        <div class="session-copy">
+            <div class="session-title-line">
+                <h3 class="session-title"></h3>
+                <span class="session-status"></span>
+            </div>
             <p class="session-meta"></p>
         </div>
         <div class="document-actions">
             <button type="button" class="open-session-button">들어가기</button>
-            <button type="button" class="secondary-button delete-session-button">삭제</button>
+            <button type="button" class="session-more-button" aria-label="세션 메뉴">•••</button>
+            <div class="session-menu hidden">
+                <button type="button" class="session-menu-item rename-session-button">이름 바꾸기</button>
+                <button type="button" class="session-menu-item delete-session-button">삭제</button>
+            </div>
         </div>
     </article>
 </template>
@@ -249,15 +307,16 @@
 <template id="document-item-template">
     <article class="document-row">
         <button type="button" class="document-row-open">
-            <div class="document-row-icon">PDF</div>
+            <div class="document-row-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/><path d="M14 3v6h6M7 15h10M7 18h7"/></svg></div>
             <div class="document-row-copy">
                 <strong class="document-name"></strong>
-                <p class="document-meta"></p>
+                <div class="document-meta-tags"></div>
+                <p class="document-uploaded-at"></p>
             </div>
         </button>
         <div class="document-row-trailing">
-            <button type="button" class="document-selected-indicator" aria-label="퀴즈 출제 PDF 선택" aria-pressed="false">✓</button>
-            <button type="button" class="document-more-button" aria-label="문서 메뉴">⋮</button>
+            <button type="button" class="document-selected-indicator" aria-label="퀴즈 출제 PDF 선택" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 12 4 4 8-8"/></svg></button>
+            <button type="button" class="document-more-button" aria-label="문서 메뉴"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>
         </div>
         <div class="document-menu hidden">
             <button type="button" class="document-menu-item rename-document-button">소스 이름 바꾸기</button>
@@ -269,9 +328,12 @@
 
 <template id="message-template">
     <article class="message-bubble">
-        <div class="message-role"></div>
-        <div class="message-content"></div>
-        <div class="message-source"></div>
+        <div class="message-avatar"></div>
+        <div class="message-body">
+            <div class="message-role"></div>
+            <div class="message-content"></div>
+            <div class="message-source"></div>
+        </div>
     </article>
 </template>
 
@@ -290,13 +352,13 @@
 <template id="quiz-set-template">
     <article class="quiz-set-card">
         <button type="button" class="quiz-set-open">
-            <div class="quiz-set-icon">?</div>
+            <div class="quiz-set-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/><path d="M14 3v6h6M8 13h8M8 17h6"/></svg></div>
             <div class="quiz-set-copy">
                 <h3 class="quiz-set-title"></h3>
                 <p class="quiz-set-meta"></p>
             </div>
         </button>
-        <button type="button" class="quiz-set-more" aria-label="퀴즈 세트 열기">⋮</button>
+        <button type="button" class="quiz-set-more" aria-label="퀴즈 세트 열기"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>
         <div class="quiz-set-menu hidden">
             <button type="button" class="quiz-set-menu-item rename-quiz-set-button">이름 바꾸기</button>
             <button type="button" class="quiz-set-menu-item delete-quiz-set-button">삭제</button>
@@ -326,6 +388,6 @@
     </article>
 </template>
 
-<script src="/app.js?v=20260602-2"></script>
+<script src="/app.js?v=20260603-workspace-3"></script>
 </body>
 </html>

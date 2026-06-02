@@ -7,6 +7,7 @@ import com.gyeongtaekim.ai_tutor.dto.ChatMessageCreateRequest;
 import com.gyeongtaekim.ai_tutor.dto.ChatMessageResponse;
 import com.gyeongtaekim.ai_tutor.dto.ChatSessionCreateRequest;
 import com.gyeongtaekim.ai_tutor.dto.ChatSessionResponse;
+import com.gyeongtaekim.ai_tutor.dto.ChatSessionTitleUpdateRequest;
 import com.gyeongtaekim.ai_tutor.repository.ChatMessageRepository;
 import com.gyeongtaekim.ai_tutor.repository.ChatSessionRepository;
 import com.gyeongtaekim.ai_tutor.repository.SessionQuizRepository;
@@ -70,6 +71,16 @@ public class ChatService {
     public ChatSessionResponse closeSession(Long sessionId) {
         ChatSession session = findSession(sessionId);
         session.close();
+        return new ChatSessionResponse(chatSessionRepository.save(session));
+    }
+
+    public ChatSessionResponse updateSessionTitle(Long sessionId, ChatSessionTitleUpdateRequest request) {
+        if (request.getTitle() == null || request.getTitle().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Session title is required");
+        }
+
+        ChatSession session = findSession(sessionId);
+        session.updateTitle(request.getTitle().trim());
         return new ChatSessionResponse(chatSessionRepository.save(session));
     }
 
