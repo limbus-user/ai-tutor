@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gyeongtaekim.ai_tutor.repository.ChatMessageRepository;
 import com.gyeongtaekim.ai_tutor.repository.ChatSessionRepository;
+import com.gyeongtaekim.ai_tutor.repository.ChatSessionDocumentRepository;
 import com.gyeongtaekim.ai_tutor.repository.ConceptRepository;
 import com.gyeongtaekim.ai_tutor.repository.DocumentChunkRepository;
 import com.gyeongtaekim.ai_tutor.repository.LearningMemoryRepository;
@@ -81,6 +82,9 @@ class AiTutorIntegrationTest {
     private ChatSessionRepository chatSessionRepository;
 
     @Autowired
+    private ChatSessionDocumentRepository chatSessionDocumentRepository;
+
+    @Autowired
     private ReviewQueueRepository reviewQueueRepository;
 
     @Autowired
@@ -114,6 +118,7 @@ class AiTutorIntegrationTest {
     void setUp() throws IOException {
         chatMessageRepository.deleteAll();
         sessionQuizRepository.deleteAll();
+        chatSessionDocumentRepository.deleteAll();
         chatSessionRepository.deleteAll();
         reviewQueueRepository.deleteAll();
         wrongAnswerNoteRepository.deleteAll();
@@ -174,6 +179,61 @@ class AiTutorIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content()
                         .string(org.hamcrest.Matchers.containsString("AI Tutor")));
+    }
+
+    @Test
+    void sessionDocumentsRemainAvailableAfterReopeningSession() throws Exception {
+        long userId = createUser("session-documents@example.com");
+        long sessionId = createSession(userId);
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "persistent.pdf",
+                "application/pdf",
+                createPdf("Persistent session document.")
+        );
+
+        MvcResult uploadResult = mockMvc.perform(multipart("/api/rag/upload").file(file))
+                .andExpect(status().isOk())
+                .andReturn();
+        long documentId = objectMapper.readTree(uploadResult.getResponse().getContentAsByteArray())
+                .get("documentId")
+                .asLong();
+
+        mockMvc.perform(post("/api/chat/sessions/{sessionId}/documents/{documentId}", sessionId, documentId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(documentId));
+
+        mockMvc.perform(get("/api/chat/sessions/{sessionId}/documents", sessionId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(documentId))
+                .andExpect(jsonPath("$[0].title").value("persistent.pdf"));
+    }
+
+    @Test
+    void sessionDocumentsDoNotIncludeFilesAttachedToAnotherSession() throws Exception {
+        long userId = createUser("isolated-session-documents@example.com");
+        long firstSessionId = createSession(userId);
+        long secondSessionId = createSession(userId);
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "isolated.pdf",
+                "application/pdf",
+                createPdf("Only the first session should contain this document.")
+        );
+
+        MvcResult uploadResult = mockMvc.perform(multipart("/api/rag/upload").file(file))
+                .andExpect(status().isOk())
+                .andReturn();
+        long documentId = objectMapper.readTree(uploadResult.getResponse().getContentAsByteArray())
+                .get("documentId")
+                .asLong();
+
+        mockMvc.perform(post("/api/chat/sessions/{sessionId}/documents/{documentId}", firstSessionId, documentId))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/chat/sessions/{sessionId}/documents", secondSessionId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isEmpty());
     }
 
     @Test
@@ -348,6 +408,8 @@ class AiTutorIntegrationTest {
                 .andExpect(jsonPath("$.documentId").value(documentId))
                 .andExpect(jsonPath("$.correct").value(true))
                 .andExpect(jsonPath("$.solved").value(true))
+                .andExpect(jsonPath("$.evaluationFeedback").value(org.hamcrest.Matchers.containsString("답안 비교\n- 내 답:")))
+                .andExpect(jsonPath("$.evaluationFeedback").value(org.hamcrest.Matchers.containsString("\n핵심 피드백\n")))
                 .andExpect(jsonPath("$.evaluationFeedback").value(org.hamcrest.Matchers.containsString("정답입니다.")));
 
         mockMvc.perform(get("/api/chat/sessions/{sessionId}/quizzes", sessionId))
@@ -615,6 +677,58 @@ class AiTutorIntegrationTest {
                 .andExpect(jsonPath("$.documentId").value(firstDocumentId))
                 .andExpect(jsonPath("$.title").value("sorting.pdf, graph.pdf"))
                 .andExpect(jsonPath("$.questions.length()").value(3));
+    }
+
+    @Test
+    void generatedShortAnswerApplicationUsesCompleteConceptAlignedAnswer() throws Exception {
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "kernel.pdf",
+                "application/pdf",
+                createPdf("""
+                        Kernel manages hardware resources for programs.
+                        Kernel mediates file and memory requests from user programs.
+                        Kernel protects the operating system by controlling resource access.
+                        """)
+        );
+
+        MvcResult upload = mockMvc.perform(multipart("/api/rag/upload").file(file))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        long documentId = objectMapper.readTree(upload.getResponse().getContentAsByteArray()).get("documentId").asLong();
+
+        MvcResult result = mockMvc.perform(post("/api/rag/generate-questions")
+                        .param("documentId", String.valueOf(documentId))
+                        .param("type", "short_answer")
+                        .param("mode", "application")
+                        .param("count", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.questions.length()").value(1))
+                .andExpect(jsonPath("$.questions[0].type").value("short_answer"))
+                .andReturn();
+
+        JsonNode question = objectMapper.readTree(result.getResponse().getContentAsByteArray())
+                .get("questions")
+                .get(0);
+        String stem = question.get("question").asText();
+        String answer = question.get("modelAnswer").asText();
+        String correctAnswer = question.get("correctAnswer").asText();
+
+        assertThat(stem.toLowerCase()).contains("kernel");
+        assertThat(answer.toLowerCase()).contains("kernel");
+        assertThat(correctAnswer).isEqualTo(answer);
+        assertThat(answer).containsAnyOf(
+                "\uD504\uB85C\uADF8\uB7A8",
+                "\uD30C\uC77C",
+                "\uBA54\uBAA8\uB9AC",
+                "\uC694\uCCAD",
+                "\uC0C1\uD669"
+        );
+        assertThat(answer).doesNotEndWith("\uB2E4\uC74C\uACFC \uAC19\uC74C")
+                .doesNotEndWith("\uC544\uB798\uC640 \uAC19\uC74C")
+                .doesNotEndWith("\uC8FC\uC694 \uC5ED\uD560\uC740");
+        assertThat(answer.length()).isGreaterThan(25);
     }
 
     private long createUser(String email) throws Exception {

@@ -34,6 +34,7 @@ public class SessionQuizSchemaInitializer {
                 Set<String> columns = readColumns(metaData, "session_quiz");
 
                 addColumnIfMissing(columns, "quiz_set_id", "alter table session_quiz add column quiz_set_id varchar(64)");
+                addColumnIfMissing(columns, "source_document_ids_json", "alter table session_quiz add column source_document_ids_json text");
                 addColumnIfMissing(columns, "quiz_set_title", "alter table session_quiz add column quiz_set_title varchar(255)");
                 addColumnIfMissing(columns, "question_order", "alter table session_quiz add column question_order integer");
                 addColumnIfMissing(columns, "concept_tag", "alter table session_quiz add column concept_tag varchar(255)");
@@ -53,9 +54,11 @@ public class SessionQuizSchemaInitializer {
                     jdbcTemplate.execute("alter table session_quiz alter column model_answer type text");
                     jdbcTemplate.execute("alter table session_quiz alter column explanation type text");
                     jdbcTemplate.execute("alter table session_quiz alter column source_evidence type text");
+                    jdbcTemplate.execute("alter table session_quiz alter column source_document_ids_json type text");
                     jdbcTemplate.execute("alter table session_quiz alter column evaluation_feedback type text");
                 }
 
+                jdbcTemplate.update("update session_quiz set source_document_ids_json = concat('[', document_id, ']') where source_document_ids_json is null");
                 jdbcTemplate.update("update session_quiz set quiz_set_id = concat('legacy-', id) where quiz_set_id is null");
                 jdbcTemplate.update("update session_quiz set quiz_set_title = 'Legacy Quiz Set' where quiz_set_title is null");
                 jdbcTemplate.update("update session_quiz set question_order = coalesce(question_order, id) where question_order is null");
@@ -68,6 +71,7 @@ public class SessionQuizSchemaInitializer {
 
                 if (isPostgreSql(metaData)) {
                     jdbcTemplate.execute("alter table session_quiz alter column quiz_set_id set not null");
+                    jdbcTemplate.execute("alter table session_quiz alter column source_document_ids_json set not null");
                     jdbcTemplate.execute("alter table session_quiz alter column quiz_set_title set not null");
                     jdbcTemplate.execute("alter table session_quiz alter column question_order set not null");
                     jdbcTemplate.execute("alter table session_quiz alter column concept_tag set not null");

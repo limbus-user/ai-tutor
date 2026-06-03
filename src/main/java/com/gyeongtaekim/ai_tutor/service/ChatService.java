@@ -2,14 +2,18 @@ package com.gyeongtaekim.ai_tutor.service;
 
 import com.gyeongtaekim.ai_tutor.domain.ChatMessage;
 import com.gyeongtaekim.ai_tutor.domain.ChatSession;
+import com.gyeongtaekim.ai_tutor.domain.ChatSessionDocument;
 import com.gyeongtaekim.ai_tutor.domain.User;
 import com.gyeongtaekim.ai_tutor.dto.ChatMessageCreateRequest;
 import com.gyeongtaekim.ai_tutor.dto.ChatMessageResponse;
 import com.gyeongtaekim.ai_tutor.dto.ChatSessionCreateRequest;
 import com.gyeongtaekim.ai_tutor.dto.ChatSessionResponse;
 import com.gyeongtaekim.ai_tutor.dto.ChatSessionTitleUpdateRequest;
+import com.gyeongtaekim.ai_tutor.dto.RagDocumentSummaryResponse;
 import com.gyeongtaekim.ai_tutor.repository.ChatMessageRepository;
+import com.gyeongtaekim.ai_tutor.repository.ChatSessionDocumentRepository;
 import com.gyeongtaekim.ai_tutor.repository.ChatSessionRepository;
+import com.gyeongtaekim.ai_tutor.repository.RagDocumentRepository;
 import com.gyeongtaekim.ai_tutor.repository.SessionQuizRepository;
 import com.gyeongtaekim.ai_tutor.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -27,7 +31,9 @@ public class ChatService {
 
     private final ChatSessionRepository chatSessionRepository;
     private final ChatMessageRepository chatMessageRepository;
+    private final ChatSessionDocumentRepository chatSessionDocumentRepository;
     private final SessionQuizRepository sessionQuizRepository;
+    private final RagDocumentRepository ragDocumentRepository;
     private final UserRepository userRepository;
 
     public ChatSessionResponse createSession(ChatSessionCreateRequest request) {
@@ -84,10 +90,34 @@ public class ChatService {
         return new ChatSessionResponse(chatSessionRepository.save(session));
     }
 
+    public List<RagDocumentSummaryResponse> getSessionDocuments(Long sessionId) {
+        findSession(sessionId);
+        List<Long> documentIds = chatSessionDocumentRepository.findBySessionIdOrderByIdAsc(sessionId).stream()
+                .map(ChatSessionDocument::getDocumentId)
+                .toList();
+
+        return documentIds.stream()
+                .map(ragDocumentRepository::findById)
+                .flatMap(java.util.Optional::stream)
+                .map(RagDocumentSummaryResponse::new)
+                .toList();
+    }
+
+    public RagDocumentSummaryResponse attachSessionDocument(Long sessionId, Long documentId) {
+        ChatSession session = findSession(sessionId);
+        var document = ragDocumentRepository.findById(documentId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document not found"));
+        if (!chatSessionDocumentRepository.existsBySessionIdAndDocumentId(sessionId, documentId)) {
+            chatSessionDocumentRepository.save(new ChatSessionDocument(session, documentId));
+        }
+        return new RagDocumentSummaryResponse(document);
+    }
+
     @Transactional
     public void deleteSession(Long sessionId) {
         findSession(sessionId);
         chatMessageRepository.deleteAllBySessionId(sessionId);
+        chatSessionDocumentRepository.deleteAllBySessionId(sessionId);
         sessionQuizRepository.deleteAllBySessionId(sessionId);
         chatSessionRepository.deleteById(sessionId);
     }

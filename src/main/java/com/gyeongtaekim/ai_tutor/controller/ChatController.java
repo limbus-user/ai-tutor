@@ -5,6 +5,7 @@ import com.gyeongtaekim.ai_tutor.dto.ChatMessageResponse;
 import com.gyeongtaekim.ai_tutor.dto.ChatSessionCreateRequest;
 import com.gyeongtaekim.ai_tutor.dto.ChatSessionResponse;
 import com.gyeongtaekim.ai_tutor.dto.ChatSessionTitleUpdateRequest;
+import com.gyeongtaekim.ai_tutor.dto.RagDocumentSummaryResponse;
 import com.gyeongtaekim.ai_tutor.service.ChatService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -66,6 +67,19 @@ public class ChatController {
             @RequestBody ChatSessionTitleUpdateRequest request
     ) {
         return ResponseEntity.ok(chatService.updateSessionTitle(sessionId, request));
+    }
+
+    @GetMapping("/sessions/{sessionId}/documents")
+    public ResponseEntity<List<RagDocumentSummaryResponse>> getSessionDocuments(@PathVariable Long sessionId) {
+        return ResponseEntity.ok(chatService.getSessionDocuments(sessionId));
+    }
+
+    @PostMapping("/sessions/{sessionId}/documents/{documentId}")
+    public ResponseEntity<RagDocumentSummaryResponse> attachSessionDocument(
+            @PathVariable Long sessionId,
+            @PathVariable Long documentId
+    ) {
+        return ResponseEntity.ok(chatService.attachSessionDocument(sessionId, documentId));
     }
 
     @DeleteMapping("/sessions/{sessionId}")

@@ -29,6 +29,9 @@ public class SessionQuiz {
     @Column(nullable = false)
     private Long documentId;
 
+    @Column(nullable = false, columnDefinition = "TEXT")
+    private String sourceDocumentIdsJson;
+
     @Column(nullable = false, length = 64)
     private String quizSetId;
 
@@ -93,6 +96,7 @@ public class SessionQuiz {
     public SessionQuiz(
             ChatSession session,
             Long documentId,
+            String sourceDocumentIdsJson,
             String quizSetId,
             String quizSetTitle,
             Integer questionOrder,
@@ -109,6 +113,7 @@ public class SessionQuiz {
     ) {
         this.session = session;
         this.documentId = documentId;
+        this.sourceDocumentIdsJson = sourceDocumentIdsJson;
         this.quizSetId = quizSetId;
         this.quizSetTitle = quizSetTitle;
         this.questionOrder = questionOrder;

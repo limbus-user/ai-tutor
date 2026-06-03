@@ -18,8 +18,8 @@
     --radius-md: 14px;
     --radius-sm: 12px;
     --shadow: 0 10px 30px rgba(88, 102, 140, 0.08);
-    --font-display: "Segoe UI", "Apple SD Gothic Neo", sans-serif;
-    --font-body: "Segoe UI", "Apple SD Gothic Neo", sans-serif;
+    --font-display: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    --font-body: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
 }
 
 * {
@@ -30,10 +30,13 @@ body {
     margin: 0;
     min-height: 100vh;
     font-family: var(--font-body);
+    font-size: 15px;
+    font-weight: 500;
     color: var(--ink);
     background:
         linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0.1)),
         linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
+    -webkit-font-smoothing: antialiased;
 }
 
 button,
@@ -41,6 +44,7 @@ input,
 textarea,
 select {
     font: inherit;
+    font-weight: 500;
 }
 
 button {
@@ -824,6 +828,10 @@ label {
 .feedback-detail,
 .empty-box {
     line-height: 1.6;
+}
+
+.evaluation-feedback {
+    white-space: pre-line;
 }
 
 .empty-box {
@@ -1653,8 +1661,7 @@ label {
 }
 
 .history-card .session-list {
-    max-height: 640px;
-    overflow-y: auto;
+    overflow: visible;
     padding-right: 3px;
 }
 
@@ -1926,6 +1933,7 @@ label {
 /* Study workspace redesign */
 #workspace-view {
     padding-top: 4px;
+    letter-spacing: -0.015em;
 }
 
 .workspace-brand {
@@ -2004,7 +2012,7 @@ label {
 .workspace-subtitle {
     margin: 8px 0 0;
     color: #71809a;
-    font-size: 0.8rem;
+    font-size: 0.84rem;
 }
 
 .workspace-status {
@@ -2105,7 +2113,7 @@ label {
 
 .workspace-dropzone small {
     color: #8c98ac;
-    font-size: 0.76rem;
+    font-size: 0.8rem;
 }
 
 .workspace-upload-options {
@@ -2131,7 +2139,7 @@ label {
     justify-content: space-between;
     margin: 16px 0 9px;
     color: #53627b;
-    font-size: 0.8rem;
+    font-size: 0.84rem;
     font-weight: 700;
 }
 
@@ -2176,7 +2184,7 @@ label {
 }
 
 #workspace-view .document-row-copy .document-name {
-    font-size: 0.88rem;
+    font-size: 0.92rem;
 }
 
 .document-meta-tags {
@@ -2193,7 +2201,7 @@ label {
     border-radius: 5px;
     color: #64738e;
     background: #fbfcff;
-    font-size: 0.62rem;
+    font-size: 0.72rem;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -2202,7 +2210,7 @@ label {
 .document-uploaded-at {
     margin: 8px 0 0;
     color: #7a879c;
-    font-size: 0.64rem;
+    font-size: 0.72rem;
 }
 
 .selected-document-footer {
@@ -2212,7 +2220,7 @@ label {
     border-top: 1px solid #e3e8f1;
     background: #fbfcfe;
     text-align: center;
-    font-size: 0.78rem;
+    font-size: 0.82rem;
     font-weight: 700;
 }
 
@@ -2259,21 +2267,21 @@ label {
 
 #workspace-view .message-role {
     color: #263349;
-    font-size: 0.76rem;
+    font-size: 0.8rem;
     letter-spacing: 0;
 }
 
 #workspace-view .message-content {
     margin-top: 5px;
     color: #263349;
-    font-size: 0.82rem;
-    line-height: 1.65;
+    font-size: 0.88rem;
+    line-height: 1.72;
 }
 
 #workspace-view .message-source {
     margin-top: 9px;
     color: #73809a;
-    font-size: 0.72rem;
+    font-size: 0.78rem;
 }
 
 #workspace-view .chat-form {
@@ -2314,7 +2322,7 @@ label {
     border-radius: 10px;
     color: #344057;
     background: #fbfcff;
-    font-size: 0.76rem;
+    font-size: 0.82rem;
 }
 
 .quiz-document-chips {
@@ -2335,7 +2343,7 @@ label {
     color: #59677d;
     border-color: #dce4f1;
     background: #ffffff;
-    font-size: 0.66rem;
+    font-size: 0.74rem;
 }
 
 .quiz-document-chip {
@@ -2347,7 +2355,7 @@ label {
     border-radius: 6px;
     color: #53627b;
     background: #ffffff;
-    font-size: 0.7rem;
+    font-size: 0.76rem;
 }
 
 .quiz-document-chip svg {
@@ -2417,5 +2425,423 @@ label {
     #workspace-view .chat-panel {
         min-height: 0;
         overflow: hidden;
+    }
+}
+
+/* Final font polish */
+body {
+    font-family: var(--font-body);
+    font-weight: 600;
+    -webkit-font-smoothing: auto;
+    text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3,
+.topbar h1,
+.workspace-topbar h1 {
+    font-family: var(--font-display);
+    font-weight: 800;
+    letter-spacing: -0.035em;
+}
+
+.message-content,
+#workspace-view .message-content {
+    font-weight: 600;
+    line-height: 1.75;
+}
+
+.document-row-copy .document-name,
+.quiz-set-title,
+.session-title {
+    font-weight: 750;
+    letter-spacing: -0.02em;
+}
+
+.document-meta,
+.session-meta,
+.quiz-set-meta,
+.document-uploaded-at,
+.message-source,
+.workspace-subtitle {
+    font-weight: 500;
+    color: #4b5563;
+}
+
+button {
+    font-weight: 800;
+}
+
+.app-shell {
+    zoom: 1.08;
+}
+
+body {
+    font-family: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    font-weight: 600;
+    -webkit-font-smoothing: auto;
+}
+/* Quiz result dashboard and comparison screen */
+.quiz-session-board {
+    width: 100%;
+    max-width: none;
+}
+
+#quiz-view .quiz-session-layout,
+#quiz-view .quiz-summary-card {
+    width: 100%;
+}
+
+.quiz-result-dashboard .quiz-summary-header {
+    align-items: flex-start;
+    justify-content: space-between;
+}
+
+.quiz-result-dashboard .summary-top-metrics {
+    grid-template-columns: minmax(0, 1.08fr) minmax(320px, 0.92fr);
+    gap: 14px;
+}
+
+.dashboard-grid {
+    grid-template-columns: minmax(0, 1.08fr) minmax(320px, 0.92fr);
+    gap: 14px;
+    align-items: start;
+}
+
+.dashboard-radar-panel {
+    grid-row: span 2;
+}
+
+.dashboard-compact-panel {
+    margin-top: 0;
+}
+
+.ai-final-feedback-card {
+    position: relative;
+    overflow: hidden;
+    margin-top: 0;
+    border-color: #bfd0ff;
+    background: linear-gradient(135deg, #f7faff 0%, #ffffff 48%, #eef4ff 100%);
+    box-shadow: 0 20px 46px rgba(47, 109, 255, 0.13);
+}
+
+.ai-final-feedback-card::after {
+    content: "";
+    position: absolute;
+    right: -44px;
+    top: -52px;
+    width: 150px;
+    height: 150px;
+    border-radius: 50%;
+    background: rgba(47, 109, 255, 0.12);
+}
+
+.ai-final-feedback-head {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+}
+
+.ai-final-feedback-head > span {
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    border-radius: 14px;
+    background: #2f6dff;
+    color: #ffffff;
+    font-weight: 900;
+    letter-spacing: -0.02em;
+}
+
+.ai-final-feedback-head p {
+    margin: 5px 0 0;
+    color: #53627b;
+    line-height: 1.6;
+}
+
+.ai-final-feedback-card .summary-feedback-copy {
+    position: relative;
+    z-index: 1;
+    background: rgba(255, 255, 255, 0.82);
+    border-color: rgba(47, 109, 255, 0.18);
+    color: #263245;
+    font-weight: 650;
+}
+
+.summary-review-list li {
+    justify-content: flex-start;
+}
+
+.summary-review-list li > div {
+    min-width: 0;
+    flex: 1;
+}
+
+.review-question-button {
+    flex: 0 0 auto;
+    padding: 7px 10px;
+    border-radius: 999px;
+    border: 1px solid #dbe4f2;
+    background: #ffffff;
+    color: #2864ed;
+    white-space: nowrap;
+    box-shadow: none;
+}
+
+.review-book-icon {
+    flex: 0 0 auto;
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    border-radius: 12px;
+    background: #fff6e8;
+    color: #d97818;
+    border: 1px solid #ffe0b8;
+}
+
+.review-book-icon svg {
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.comparison-entry-card {
+    display: grid;
+    gap: 14px;
+    margin-top: 0;
+    border-color: #d8e1f2;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+
+.comparison-entry-card button {
+    width: fit-content;
+    background: #263245;
+}
+
+.comparison-entry-card small {
+    color: var(--muted);
+}
+
+.quiz-comparison-screen {
+    display: grid;
+    gap: 16px;
+}
+
+.comparison-screen-header {
+    justify-content: space-between;
+    align-items: flex-start;
+}
+
+.comparison-layout {
+    display: grid;
+    grid-template-columns: minmax(240px, 0.36fr) minmax(0, 1fr);
+    gap: 14px;
+    align-items: start;
+}
+
+.comparison-list-panel,
+.comparison-detail-panel {
+    margin-top: 0;
+}
+
+.comparison-result-list {
+    display: grid;
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.comparison-result-item {
+    display: grid;
+    gap: 5px;
+    width: 100%;
+    padding: 13px 14px;
+    text-align: left;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: #ffffff;
+    color: var(--ink);
+    box-shadow: none;
+}
+
+.comparison-result-item:hover,
+.comparison-result-item.selected {
+    border-color: #b9c9ff;
+    background: #f6f9ff;
+}
+
+.comparison-result-item.current {
+    border-color: #2f6dff;
+}
+
+.comparison-result-item span,
+.comparison-result-item small {
+    color: var(--muted);
+    font-size: 0.78rem;
+}
+
+.comparison-vs-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.comparison-column {
+    padding: 16px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: #ffffff;
+}
+
+.comparison-column.current {
+    border-color: #bfd0ff;
+    background: #f8fbff;
+}
+
+.current-result-badge,
+.current-feedback-label {
+    display: inline-flex;
+    width: fit-content;
+    align-items: center;
+    gap: 6px;
+    border-radius: 999px;
+    background: #eaf2ff;
+    color: #2864ed;
+    font-size: 0.78rem;
+    font-weight: 850;
+}
+
+.current-result-badge {
+    margin-top: 8px;
+    padding: 6px 9px;
+}
+
+.current-feedback-label {
+    margin-top: 8px;
+    padding: 5px 8px;
+}
+
+.comparison-column > p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.86rem;
+    font-weight: 800;
+}
+
+.comparison-column h4 {
+    margin: 6px 0 12px;
+    font-size: 1rem;
+}
+
+.comparison-score {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #edf1f7;
+}
+
+.comparison-score strong {
+    color: #2f6dff;
+    font-size: 2rem;
+}
+
+.comparison-score span {
+    padding-bottom: 6px;
+    color: var(--muted);
+}
+
+.comparison-stage-mini {
+    display: grid;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.comparison-stage-mini div {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 9px 10px;
+    border-radius: 12px;
+    background: var(--panel-soft);
+}
+
+.comparison-stage-mini span,
+.comparison-top-concepts p,
+.comparison-feedback-summary p {
+    color: var(--muted);
+}
+
+.comparison-top-concepts,
+.comparison-feedback-summary {
+    margin-top: 14px;
+}
+
+.comparison-top-concepts p,
+.comparison-feedback-summary p {
+    margin: 7px 0 0;
+    line-height: 1.65;
+}
+
+.comparison-delta-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.comparison-delta-card {
+    display: grid;
+    gap: 5px;
+    padding: 13px;
+    border-radius: 14px;
+    background: var(--panel-soft);
+    border: 1px solid var(--line);
+}
+
+.comparison-delta-card span,
+.comparison-delta-card small {
+    color: var(--muted);
+}
+
+.comparison-delta-card strong {
+    font-size: 1.25rem;
+}
+
+.comparison-delta-card.good strong {
+    color: #1d7d56;
+}
+
+.comparison-delta-card.mid strong {
+    color: #8a6413;
+}
+
+.comparison-delta-card.low strong {
+    color: var(--danger);
+}
+
+@media (max-width: 920px) {
+    .quiz-result-dashboard .summary-top-metrics,
+    .dashboard-grid,
+    .comparison-layout,
+    .comparison-vs-grid,
+    .comparison-delta-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .dashboard-radar-panel {
+        grid-row: auto;
+    }
+
+    .comparison-screen-header {
+        display: grid;
     }
 }

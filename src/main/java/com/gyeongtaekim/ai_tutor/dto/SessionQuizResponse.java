@@ -15,6 +15,7 @@ public class SessionQuizResponse {
     private final Long id;
     private final Long sessionId;
     private final Long documentId;
+    private final List<Long> sourceDocumentIds;
     private final String quizSetId;
     private final String quizSetTitle;
     private final Integer order;
@@ -41,6 +42,7 @@ public class SessionQuizResponse {
         this.id = quiz.getId();
         this.sessionId = quiz.getSession().getId();
         this.documentId = quiz.getDocumentId();
+        this.sourceDocumentIds = parseSourceDocumentIds(quiz.getSourceDocumentIdsJson(), quiz.getDocumentId());
         this.quizSetId = quiz.getQuizSetId();
         this.quizSetTitle = quiz.getQuizSetTitle();
         this.order = quiz.getQuestionOrder();
@@ -69,6 +71,17 @@ public class SessionQuizResponse {
             return OBJECT_MAPPER.readValue(choicesJson, new TypeReference<>() {});
         } catch (Exception e) {
             throw new IllegalStateException("Failed to parse quiz choices", e);
+        }
+    }
+
+    private List<Long> parseSourceDocumentIds(String sourceDocumentIdsJson, Long fallbackDocumentId) {
+        if (sourceDocumentIdsJson == null || sourceDocumentIdsJson.isBlank()) {
+            return fallbackDocumentId == null ? List.of() : List.of(fallbackDocumentId);
+        }
+        try {
+            return OBJECT_MAPPER.readValue(sourceDocumentIdsJson, new TypeReference<>() {});
+        } catch (Exception e) {
+            return fallbackDocumentId == null ? List.of() : List.of(fallbackDocumentId);
         }
     }
 }

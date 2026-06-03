@@ -630,6 +630,7 @@ function getCurrentDocumentQuizSets() {
         quizSetId: quiz.quizSetId,
         quizSetTitle: quiz.quizSetTitle,
         documentId: quiz.documentId,
+        sourceDocumentIds: getQuizSourceDocumentIds(quiz),
         createdAt: quiz.createdAt,
         questions: [],
       });
@@ -700,12 +701,14 @@ function buildQuizSessionState(quizSet) {
     sessionId: state.currentSession.id,
     quizSetId: quizSet.quizSetId,
     documentId: quizSet.documentId,
+    sourceDocumentIds: normalizeDocumentIdSet(quizSet.sourceDocumentIds || getQuizSourceDocumentIds(questions[0])),
     title: quizSet.quizSetTitle,
     questions,
     currentIndex: firstUnsolvedIndex >= 0 ? firstUnsolvedIndex : 0,
     answers,
     revealed,
     results,
+    retryQuestionIndexes: [],
     completed: questions.length > 0 && questions.every((quiz) => quiz.solved),
   };
 }
@@ -833,7 +836,7 @@ function renderQuizSession() {
       <div class="feedback-detail"><strong>해설:</strong> ${quiz.explanation || quiz.modelAnswer || ""}</div>
       <div class="feedback-detail"><strong>개념 태그:</strong> ${quiz.conceptTag || "핵심 개념"}</div>
       <div class="feedback-detail"><strong>이해 단계:</strong> ${formatUnderstandingLevelLabel(quiz.understandingLevel)}</div>
-      ${savedResult?.evaluationFeedback ? `<div class="feedback-detail"><strong>답안 비교:</strong> ${savedResult.evaluationFeedback}</div>` : ""}
+      ${savedResult?.evaluationFeedback ? `<div class="feedback-detail evaluation-feedback">${savedResult.evaluationFeedback}</div>` : ""}
     `;
   }
 
@@ -880,6 +883,22 @@ function renderQuizSession() {
 
   nextButton.textContent = currentIndex >= quizzes.length - 1 ? "완료" : "다음";
   nextButton.addEventListener("click", () => {
+    if (!state.quizSession.revealed?.[answerKey]) {
+      feedback.innerHTML = '<div class="feedback-badge wrong">정답 확인 후 다음 문제로 이동할 수 있습니다.</div>';
+      return;
+    }
+    const nextRetryIndex = findNextRetryQuestionIndex(currentIndex);
+    if (nextRetryIndex !== null) {
+      state.quizSession.currentIndex = nextRetryIndex;
+      renderQuizSession();
+      return;
+    }
+    if (isRetryModeActive()) {
+      state.quizSession.completed = true;
+      state.quizSession.retryQuestionIndexes = [];
+      renderQuizSession();
+      return;
+    }
     if (currentIndex < quizzes.length - 1) {
       state.quizSession.currentIndex += 1;
       renderQuizSession();
@@ -912,45 +931,49 @@ function isAnswerCorrect(submittedAnswer, correctAnswer) {
 
 function renderQuizSummary(board, quizzes) {
   const analysis = buildQuizAnalysis(quizzes);
-  const comparison = buildSameDocumentFeedbackComparison(analysis);
+  const comparisonSets = buildSameDocumentQuizSetSummaries(analysis);
   const radarSvg = buildRadarChartSvg(analysis.stageResults);
   const wrongQuestions = analysis.wrongQuestions.map((item) => `
-    <li>
+    <li data-review-index="${item.index}">
+      <span class="review-book-icon" aria-hidden="true">${bookIconSvg()}</span>
       <div>
         <strong>${item.conceptTag}</strong>
         <p>${item.question}</p>
       </div>
-      <span>관련 문제 다시 풀기</span>
+      <button type="button" class="text-button review-question-button" data-review-index="${item.index}">다시풀기</button>
     </li>
   `).join("");
 
   board.innerHTML = `
-    <article class="quiz-summary-card">
+    <article class="quiz-summary-card quiz-result-dashboard">
       <div class="quiz-summary-header">
         <div>
-          <h2>이해 단계 분석 결과</h2>
-          <p class="summary-copy">사용자의 문제 풀이 결과를 바탕으로 이해 단계를 분석했습니다.</p>
+          <p class="eyebrow">Quiz Result</p>
+          <h2>이번 퀴즈 결과</h2>
+          <p class="summary-copy">현재 퀴즈 세트의 정답률, 이해 단계, 부족 개념, 복습 대상을 한 화면에서 확인합니다.</p>
         </div>
       </div>
 
       <section class="summary-top-metrics">
         <div class="summary-metric-card primary">
-          <div class="summary-metric-icon">◎</div>
+          <div class="summary-metric-icon">%</div>
           <div>
             <p>전체 정답률</p>
             <strong>${analysis.accuracy}%</strong>
           </div>
         </div>
         <div class="summary-metric-card">
-          <div class="summary-metric-icon neutral">≣</div>
+          <div class="summary-metric-icon neutral">✓</div>
           <div>
-            <p>총 ${analysis.totalCount}문제 중 ${analysis.correctCount}문제 정답</p>
+            <p>총 ${analysis.totalCount}문제 중</p>
+            <strong>${analysis.correctCount}문제</strong>
+            <small>정답</small>
           </div>
         </div>
       </section>
 
-      <div class="quiz-summary-grid">
-        <section class="summary-panel summary-panel-emphasis">
+      <div class="quiz-summary-grid dashboard-grid">
+        <section class="summary-panel summary-panel-emphasis dashboard-radar-panel">
           <h3>이해 단계 삼각형 분석</h3>
           <div class="summary-radar-wrap">
             <div class="summary-radar-chart">${radarSvg}</div>
@@ -968,22 +991,22 @@ function renderQuizSummary(board, quizzes) {
             </div>
           </div>
           <div class="summary-stage-legend">
-            <span><i class="legend-dot good"></i>양호 (70% 이상)</span>
-            <span><i class="legend-dot mid"></i>보통 (40% ~ 69%)</span>
-            <span><i class="legend-dot low"></i>부족 (40% 미만)</span>
+            <span><i class="legend-dot good"></i>양호</span>
+            <span><i class="legend-dot mid"></i>보통</span>
+            <span><i class="legend-dot low"></i>부족</span>
           </div>
         </section>
 
         <section class="summary-column-stack">
-          <section class="summary-panel">
-          <h3>부족 개념 TOP 3</h3>
-          <ol class="summary-concept-list">
-            ${analysis.topConcepts.map((item, index) => `<li><span class="rank-badge rank-${index + 1}">${index + 1}</span><span>${item.name}</span><strong>오답 ${item.wrongCount}회</strong></li>`).join("") || "<li><span class=\"rank-badge rank-1\">1</span><span>반복 오답 개념 없음</span><strong>오답 0회</strong></li>"}
-          </ol>
-        </section>
+          <section class="summary-panel dashboard-compact-panel">
+            <h3>부족 개념 TOP 3</h3>
+            <ol class="summary-concept-list">
+              ${analysis.topConcepts.map((item, index) => `<li><span class="rank-badge rank-${index + 1}">${index + 1}</span><span>${item.name}</span><strong>오답 ${item.wrongCount}개</strong></li>`).join("") || '<li><span class="rank-badge rank-1">1</span><span>반복 오답 개념 없음</span><strong>오답 0개</strong></li>'}
+            </ol>
+          </section>
 
-          <section class="summary-panel">
-            <h3>이해 단계 결과</h3>
+          <section class="summary-panel dashboard-compact-panel">
+            <h3>이해 단계별 결과</h3>
             <div class="summary-progress-list">
               ${analysis.stageResults.map((stage) => `
                 <div class="summary-progress-item">
@@ -1002,26 +1025,38 @@ function renderQuizSummary(board, quizzes) {
             </div>
           </section>
         </section>
+
+        <section class="summary-panel ai-final-feedback-card">
+          <div class="ai-final-feedback-head">
+            <span>AI</span>
+            <div>
+              <h3>AI 최종 피드백</h3>
+              <p>이번 퀴즈 기준으로 다음 학습 우선순위를 제안합니다.</p>
+            </div>
+          </div>
+          <p class="summary-copy summary-feedback-copy">${analysis.feedback}</p>
+        </section>
+
+        <section class="summary-panel dashboard-compact-panel">
+          <h3>추천 복습 목록</h3>
+          ${wrongQuestions ? `<ul class="summary-review-list">${wrongQuestions}</ul>` : '<p class="summary-copy">틀린 문제가 없습니다. 현재 개념 흐름을 유지하며 다음 단원으로 넘어가도 됩니다.</p>'}
+        </section>
+
+        <section class="summary-panel comparison-entry-card">
+          <div>
+            <p class="eyebrow">Feedback Compare</p>
+            <h3>최종 피드백 비교</h3>
+            <p class="summary-copy">같은 PDF에서 생성된 다른 퀴즈 결과와 현재 결과를 비교합니다.</p>
+          </div>
+          <button type="button" class="quiz-open-comparison-button">비교 화면 열기</button>
+          <small>${comparisonSets.length > 1 ? `비교 가능한 결과 ${comparisonSets.length}개` : "비교 가능한 이전 결과 없음"}</small>
+        </section>
       </div>
 
-      <section class="summary-panel">
-        <h3>AI 최종 피드백</h3>
-        <p class="summary-copy summary-feedback-copy">${analysis.feedback}</p>
-      </section>
-
-      <section class="summary-panel">
-        <h3>같은 PDF 풀이 비교</h3>
-        ${renderSameDocumentFeedbackComparison(comparison)}
-      </section>
-
-      <section class="summary-panel">
-        <h3>추천 복습 목록</h3>
-        ${wrongQuestions ? `<ul class="summary-review-list">${wrongQuestions}</ul>` : '<p class="summary-copy">틀린 문제가 없습니다.</p>'}
-      </section>
-
       <div class="quiz-summary-actions">
-        <button type="button" class="secondary-button quiz-review-wrong-button">틀린 문제 다시 풀기</button>
-        <button type="button" class="quiz-back-workspace-button">학습 화면으로</button>
+        <button type="button" class="secondary-button quiz-reset-all-button">문제들 다시풀기</button>
+        <button type="button" class="secondary-button quiz-review-wrong-button">틀린 문제 다시 보기</button>
+        <button type="button" class="quiz-back-workspace-button">학습 화면으로 이동</button>
       </div>
     </article>
   `;
@@ -1031,26 +1066,205 @@ function renderQuizSummary(board, quizzes) {
   });
 
   board.querySelector(".quiz-review-wrong-button").addEventListener("click", () => {
-    restartWrongQuestions(analysis.wrongQuestions);
+    void restartWrongQuestions(analysis.wrongQuestions);
+  });
+
+  board.querySelector(".quiz-reset-all-button").addEventListener("click", () => {
+    void resetCurrentQuizSet();
+  });
+
+  board.querySelector(".quiz-open-comparison-button").addEventListener("click", () => {
+    renderQuizComparisonScreen(board, analysis);
+  });
+
+  board.querySelectorAll(".review-question-button").forEach((button) => {
+    button.addEventListener("click", () => {
+      const index = Number(button.dataset.reviewIndex);
+      const wrongQuestion = analysis.wrongQuestions.find((item) => item.index === index);
+      if (wrongQuestion) {
+        void restartWrongQuestions([wrongQuestion]);
+      }
+    });
   });
 }
 
-function buildSameDocumentFeedbackComparison(currentAnalysis) {
-  const currentDocumentId = state.quizSession?.documentId;
-  const currentQuizSetId = state.quizSession?.quizSetId;
-  const previousQuizzes = (state.currentWorkspace?.quizzes || []).filter((quiz) =>
-    quiz.documentId === currentDocumentId
-      && quiz.quizSetId !== currentQuizSetId
-      && quiz.solved,
-  );
+function renderQuizComparisonScreen(board, currentAnalysis = buildQuizAnalysis(state.quizSession?.questions || [])) {
+  const comparisonSets = buildSameDocumentQuizSetSummaries(currentAnalysis);
+  const current = comparisonSets.find((item) => item.isCurrent) || buildQuizSetSummary(state.quizSession?.questions || [], {
+    quizSetId: state.quizSession?.quizSetId,
+    quizSetTitle: state.quizSession?.title,
+    isCurrent: true,
+    results: state.quizSession?.results || {},
+  });
+  const previousSets = comparisonSets.filter((item) => !item.isCurrent);
+  const defaultPrevious = previousSets[0] || null;
 
-  if (!currentDocumentId || !previousQuizzes.length) {
-    return null;
+  board.innerHTML = `
+    <article class="quiz-summary-card quiz-comparison-screen">
+      <div class="quiz-summary-header comparison-screen-header">
+        <div>
+          <p class="eyebrow">Quiz Compare</p>
+          <h2>같은 PDF 퀴즈 결과 비교</h2>
+          <p class="summary-copy">현재 결과와 같은 PDF에서 생성된 완료 퀴즈 결과를 비교합니다.</p>
+        </div>
+        <button type="button" class="secondary-button quiz-back-result-button">결과 화면으로 돌아가기</button>
+      </div>
+
+      <div class="comparison-layout">
+        <section class="summary-panel comparison-list-panel">
+          <h3>같은 PDF에서 생성된 퀴즈 결과 목록</h3>
+          <div class="comparison-result-list">
+            ${comparisonSets.map((item) => `
+              <button type="button" class="comparison-result-item ${item.isCurrent ? "current" : ""}" data-quiz-set-id="${item.quizSetId}">
+                <span>${item.isCurrent ? "현재" : "이전"}</span>
+                <strong>${item.quizSetTitle || "퀴즈 세트"}</strong>
+                <small>${item.accuracy}% · ${item.correctCount}/${item.totalCount} 정답</small>
+              </button>
+            `).join("") || '<p class="summary-copy">같은 PDF의 완료된 퀴즈 결과가 없습니다.</p>'}
+          </div>
+        </section>
+
+        <section class="summary-panel comparison-detail-panel">
+          <h3>현재 결과 vs 이전 결과 비교</h3>
+          <div id="comparison-detail-content">
+            ${renderComparisonDetail(current, defaultPrevious)}
+          </div>
+        </section>
+      </div>
+    </article>
+  `;
+
+  board.querySelector(".quiz-back-result-button").addEventListener("click", () => {
+    renderQuizSummary(board, state.quizSession?.questions || []);
+  });
+
+  board.querySelectorAll(".comparison-result-item").forEach((button) => {
+    button.addEventListener("click", () => {
+      const selected = comparisonSets.find((item) => item.quizSetId === button.dataset.quizSetId);
+      if (!selected?.isCurrent) {
+        board.querySelector("#comparison-detail-content").innerHTML = renderComparisonDetail(current, selected);
+      }
+      board.querySelectorAll(".comparison-result-item").forEach((item) => item.classList.remove("selected"));
+      button.classList.add("selected");
+    });
+  });
+
+  const firstPreviousButton = Array.from(board.querySelectorAll(".comparison-result-item"))
+    .find((button) => button.dataset.quizSetId !== String(state.quizSession?.quizSetId));
+  firstPreviousButton?.classList.add("selected");
+}
+
+function renderComparisonDetail(current, previous) {
+  if (!previous) {
+    return `
+      <div class="empty-box">같은 PDF에서 완료된 이전 퀴즈 결과가 없습니다. 다른 퀴즈를 풀면 이 화면에서 정답률, 이해 단계, 부족 개념, 최종 피드백을 비교할 수 있습니다.</div>
+      ${renderComparisonColumn("현재 결과", current)}
+    `;
   }
 
-  const previousCorrectCount = previousQuizzes.filter((quiz) => quiz.correct).length;
-  const previousAccuracy = Math.round((previousCorrectCount / previousQuizzes.length) * 100);
-  const previousResults = Object.fromEntries(previousQuizzes.map((quiz, index) => [
+  return `
+    <div class="comparison-vs-grid">
+      ${renderComparisonColumn("현재 결과", current)}
+      ${renderComparisonColumn("이전 결과", previous)}
+    </div>
+    <div class="comparison-delta-grid">
+      ${renderDeltaCard("전체 정답률", current.accuracy, previous.accuracy)}
+      ${renderDeltaCard("개념 이해", stageRateFromSummary(current, "CONCEPT_UNDERSTANDING"), stageRateFromSummary(previous, "CONCEPT_UNDERSTANDING"))}
+      ${renderDeltaCard("개념 구분", stageRateFromSummary(current, "CONCEPT_DISTINCTION"), stageRateFromSummary(previous, "CONCEPT_DISTINCTION"))}
+      ${renderDeltaCard("개념 적용", stageRateFromSummary(current, "CONCEPT_APPLICATION"), stageRateFromSummary(previous, "CONCEPT_APPLICATION"))}
+    </div>
+  `;
+}
+
+function renderComparisonColumn(label, summary) {
+  return `
+    <section class="comparison-column ${summary?.isCurrent ? "current" : ""}">
+      <p>${label}</p>
+      ${summary?.isCurrent ? `<div class="current-result-badge">현재 결과 기준 · 정답률 ${summary?.accuracy ?? 0}%</div>` : ""}
+      <h4>${summary?.quizSetTitle || "퀴즈 세트"}</h4>
+      <div class="comparison-score"><strong>${summary?.accuracy ?? 0}%</strong><span>${summary?.correctCount ?? 0}/${summary?.totalCount ?? 0} 정답</span></div>
+      <div class="comparison-stage-mini">
+        ${["CONCEPT_UNDERSTANDING", "CONCEPT_DISTINCTION", "CONCEPT_APPLICATION"].map((level) => `
+          <div><span>${formatUnderstandingLevelLabel(level)}</span><strong>${stageRateFromSummary(summary, level)}%</strong></div>
+        `).join("")}
+      </div>
+      <div class="comparison-top-concepts">
+        <strong>부족 개념 TOP</strong>
+        <p>${formatTopConcepts(summary?.topConcepts || [])}</p>
+      </div>
+      <div class="comparison-feedback-summary">
+        <strong>AI 최종 피드백 요약</strong>
+        ${summary?.isCurrent ? '<span class="current-feedback-label">현재 결과에서 나온 최종 피드백</span>' : ""}
+        <p>${summarizeFeedback(summary?.feedback || "")}</p>
+      </div>
+    </section>
+  `;
+}
+
+function renderDeltaCard(label, currentValue, previousValue) {
+  const diff = currentValue - previousValue;
+  const diffText = diff === 0 ? "변화 없음" : `${diff > 0 ? "+" : ""}${diff}%p`;
+  const diffClass = diff > 0 ? "good" : diff < 0 ? "low" : "mid";
+  return `
+    <div class="comparison-delta-card ${diffClass}">
+      <span>${label}</span>
+      <strong>${diffText}</strong>
+      <small>현재 ${currentValue}% · 이전 ${previousValue}%</small>
+    </div>
+  `;
+}
+
+function buildSameDocumentQuizSetSummaries(currentAnalysis) {
+  const currentDocumentId = state.quizSession?.documentId;
+  const currentQuizSetId = state.quizSession?.quizSetId;
+  const currentSourceDocumentIds = normalizeDocumentIdSet(state.quizSession?.sourceDocumentIds || [currentDocumentId]);
+  const currentSourceKey = documentSetKey(currentSourceDocumentIds);
+  const allQuizzes = state.currentWorkspace?.quizzes || [];
+  const map = new Map();
+
+  allQuizzes
+    .filter((quiz) => quiz.solved && documentSetKey(getQuizSourceDocumentIds(quiz)) === currentSourceKey)
+    .forEach((quiz) => {
+      if (!map.has(quiz.quizSetId)) {
+        map.set(quiz.quizSetId, {
+          quizSetId: quiz.quizSetId,
+          quizSetTitle: quiz.quizSetTitle,
+          sourceDocumentIds: getQuizSourceDocumentIds(quiz),
+          createdAt: quiz.createdAt,
+          questions: [],
+        });
+      }
+      map.get(quiz.quizSetId).questions.push(quiz);
+    });
+
+  const summaries = Array.from(map.values()).map((quizSet) => buildQuizSetSummary(quizSet.questions, {
+    quizSetId: quizSet.quizSetId,
+    quizSetTitle: quizSet.quizSetTitle,
+    createdAt: quizSet.createdAt,
+    sourceDocumentIds: quizSet.sourceDocumentIds,
+    isCurrent: quizSet.quizSetId === currentQuizSetId,
+  }));
+
+  if (!summaries.some((item) => item.quizSetId === currentQuizSetId)) {
+    summaries.push({
+      ...currentAnalysis,
+      quizSetId: currentQuizSetId,
+      quizSetTitle: state.quizSession?.title,
+      sourceDocumentIds: currentSourceDocumentIds,
+      isCurrent: true,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  return summaries.sort((a, b) => {
+    if (a.isCurrent) return -1;
+    if (b.isCurrent) return 1;
+    return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+  });
+}
+
+function buildQuizSetSummary(quizzes, options = {}) {
+  const results = options.results || Object.fromEntries((quizzes || []).map((quiz, index) => [
     String(index),
     {
       submittedAnswer: quiz.submittedAnswer || "",
@@ -1058,38 +1272,74 @@ function buildSameDocumentFeedbackComparison(currentAnalysis) {
       evaluationFeedback: quiz.evaluationFeedback || "",
     },
   ]));
-  const previousAnalysis = buildQuizAnalysis(previousQuizzes, previousResults);
+  const analysis = buildQuizAnalysis(quizzes || [], results);
   return {
-    previousCount: previousQuizzes.length,
-    previousAccuracy,
-    currentAccuracy: currentAnalysis.accuracy,
-    difference: currentAnalysis.accuracy - previousAccuracy,
-    previousFeedback: previousAnalysis.feedback,
-    currentFeedback: currentAnalysis.feedback,
+    ...analysis,
+    quizSetId: options.quizSetId,
+    quizSetTitle: options.quizSetTitle,
+    sourceDocumentIds: normalizeDocumentIdSet(options.sourceDocumentIds || getQuizSourceDocumentIds((quizzes || [])[0])),
+    createdAt: options.createdAt,
+    isCurrent: Boolean(options.isCurrent),
   };
 }
 
-function renderSameDocumentFeedbackComparison(comparison) {
-  if (!comparison) {
-    return '<p class="summary-copy">같은 PDF로 완료한 이전 풀이가 없습니다. 다음 풀이부터 이전 결과와 비교합니다.</p>';
+function getQuizSourceDocumentIds(quiz) {
+  if (!quiz) {
+    return [];
   }
+  const inferredDocumentIds = inferQuizSourceDocumentIdsFromTitle(quiz.quizSetTitle);
+  if (Array.isArray(quiz.sourceDocumentIds) && quiz.sourceDocumentIds.length) {
+    const explicitDocumentIds = normalizeDocumentIdSet(quiz.sourceDocumentIds);
+    return inferredDocumentIds.length > explicitDocumentIds.length ? inferredDocumentIds : explicitDocumentIds;
+  }
+  return inferredDocumentIds.length ? inferredDocumentIds : normalizeDocumentIdSet([quiz.documentId]);
+}
 
-  const differenceText = comparison.difference === 0
-    ? "변화 없음"
-    : `${comparison.difference > 0 ? "+" : ""}${comparison.difference}%p`;
-  const comparisonClass = comparison.difference > 0 ? "good" : comparison.difference < 0 ? "low" : "mid";
+function normalizeDocumentIdSet(documentIds) {
+  return [...new Set((documentIds || [])
+    .map((documentId) => Number(documentId))
+    .filter((documentId) => Number.isFinite(documentId) && documentId > 0))]
+    .sort((a, b) => a - b);
+}
 
-  return `
-    <div class="summary-comparison-grid">
-      <div><span>이전 동일 PDF 풀이</span><strong>${comparison.previousAccuracy}%</strong><small>${comparison.previousCount}문제 기준</small></div>
-      <div><span>현재 풀이</span><strong>${comparison.currentAccuracy}%</strong><small>현재 퀴즈 세트</small></div>
-      <div class="${comparisonClass}"><span>정답률 변화</span><strong>${differenceText}</strong><small>동일 PDF 결과만 비교</small></div>
-    </div>
-    <div class="summary-feedback-comparison">
-      <div><strong>이전 최종 피드백</strong><p>${comparison.previousFeedback}</p></div>
-      <div><strong>현재 최종 피드백</strong><p>${comparison.currentFeedback}</p></div>
-    </div>
-  `;
+function documentSetKey(documentIds) {
+  return normalizeDocumentIdSet(documentIds).join(",");
+}
+
+function inferQuizSourceDocumentIdsFromTitle(quizSetTitle) {
+  const title = quizSetTitle || "";
+  if (!title) {
+    return [];
+  }
+  const matchedDocumentIds = (state.currentWorkspace?.documents || [])
+    .filter((documentInfo) => {
+      const candidates = [documentInfo.title, documentInfo.storedFileName]
+        .filter(Boolean)
+        .map((value) => String(value).trim())
+        .filter(Boolean);
+      return candidates.some((candidate) => title.includes(candidate));
+    })
+    .map((documentInfo) => documentInfo.documentId);
+  return normalizeDocumentIdSet(matchedDocumentIds);
+}
+
+function stageRateFromSummary(summary, level) {
+  return findStageRate(summary?.stageResults || [], level);
+}
+
+function formatTopConcepts(topConcepts) {
+  return topConcepts.length
+    ? topConcepts.map((item, index) => `${index + 1}. ${item.name} (${item.wrongCount})`).join(" · ")
+    : "부족 개념 없음";
+}
+
+function summarizeFeedback(feedback) {
+  const normalized = (feedback || "").replace(/\s+/g, " ").trim();
+  return normalized.length > 120 ? `${normalized.slice(0, 120)}...` : normalized || "피드백 없음";
+}
+
+function bookIconSvg() {
+  return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4.5A2.5 2.5 0 0 1 7.5 2H20v17H7.5A2.5 2.5 0 0 0 5 21.5Z"/><path d="M5 4.5v17A2.5 2.5 0 0 1 7.5 19H20"/><path d="M9 6h7"/></svg>`;
 }
 
 function buildQuizAnalysis(quizzes, results = state.quizSession?.results || {}) {
@@ -1109,6 +1359,7 @@ function buildQuizAnalysis(quizzes, results = state.quizSession?.results || {}) 
     } else {
       wrongQuestions.push({
         index,
+        quizId: quiz.id,
         question: quiz.question,
         conceptTag,
         understandingLevel,
@@ -1251,22 +1502,110 @@ function formatPoint(point) {
   return `${point.x},${point.y}`;
 }
 
-function restartWrongQuestions(wrongQuestions) {
+function reviewWrongQuestions(wrongQuestions) {
   if (!wrongQuestions.length) {
     showView("workspace");
     return;
   }
 
-  wrongQuestions.forEach((item) => {
-    const key = String(item.index);
-    delete state.quizSession.answers[key];
-    delete state.quizSession.revealed[key];
-    delete state.quizSession.results[key];
-  });
-
   state.quizSession.currentIndex = wrongQuestions[0].index;
   state.quizSession.completed = false;
   renderQuizSession();
+}
+
+function isRetryModeActive() {
+  return Array.isArray(state.quizSession?.retryQuestionIndexes)
+    && state.quizSession.retryQuestionIndexes.length > 0;
+}
+
+function isRetryModeComplete() {
+  if (!isRetryModeActive()) {
+    return false;
+  }
+  return state.quizSession.retryQuestionIndexes.every((index) =>
+    Boolean(state.quizSession.revealed?.[String(index)]),
+  );
+}
+
+function findNextRetryQuestionIndex(currentIndex) {
+  if (!isRetryModeActive()) {
+    return null;
+  }
+  const nextIndex = state.quizSession.retryQuestionIndexes
+    .filter((index) => index > currentIndex)
+    .find((index) => !state.quizSession.revealed?.[String(index)]);
+  return nextIndex ?? null;
+}
+
+async function restartWrongQuestions(wrongQuestions) {
+  if (!wrongQuestions.length) {
+    showView("workspace");
+    return;
+  }
+
+  try {
+    const resetResults = await Promise.all(wrongQuestions.map((item) => {
+      const quiz = state.quizSession.questions[item.index];
+      const quizId = item.quizId || quiz?.id;
+      if (!quizId) {
+        return null;
+      }
+      return apiFetch(`/api/chat/sessions/${state.quizSession.sessionId}/quizzes/${quizId}/reset`, {
+        method: "POST",
+      });
+    }));
+
+    resetResults.filter(Boolean).forEach(syncQuizInState);
+
+    wrongQuestions.forEach((item) => {
+      const key = String(item.index);
+      delete state.quizSession.answers[key];
+      delete state.quizSession.revealed[key];
+      delete state.quizSession.results[key];
+    });
+
+    state.quizSession.retryQuestionIndexes = wrongQuestions.map((item) => item.index);
+    state.quizSession.currentIndex = wrongQuestions[0].index;
+    state.quizSession.completed = false;
+    renderQuizSession();
+  } catch (error) {
+    alert(formatErrorMessage(error, "문제를 다시 풀 수 있도록 초기화하지 못했습니다."));
+  }
+}
+
+async function resetCurrentQuizSet() {
+  if (!state.quizSession?.quizSetId) {
+    return;
+  }
+
+  const confirmed = window.confirm("현재 퀴즈의 모든 풀이 기록과 피드백을 초기화하고 처음부터 다시 푸시겠습니까?");
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    const resetQuizzes = await apiFetch(
+      `/api/chat/sessions/${state.quizSession.sessionId}/quizzes/sets/${state.quizSession.quizSetId}/reset`,
+      { method: "POST" },
+    );
+
+    const resetById = new Map(resetQuizzes.map((quiz) => [quiz.id, quiz]));
+    state.currentWorkspace.quizzes = (state.currentWorkspace?.quizzes || []).map((quiz) =>
+      resetById.get(quiz.id) || quiz,
+    );
+    state.quizSession.questions = state.quizSession.questions.map((quiz) =>
+      resetById.get(quiz.id) || quiz,
+    );
+    state.quizSession.answers = {};
+    state.quizSession.revealed = {};
+    state.quizSession.results = {};
+    state.quizSession.retryQuestionIndexes = [];
+    state.quizSession.currentIndex = 0;
+    state.quizSession.completed = false;
+    renderQuizSession();
+  } catch (error) {
+    alert(formatErrorMessage(error, "퀴즈를 처음부터 다시 풀 수 있도록 초기화하지 못했습니다."));
+  }
 }
 
 function parseDocumentTitlesFromMessages(messages) {
@@ -1318,6 +1657,18 @@ function inferDocumentsForSession(messages, quizzes) {
   });
 
   return documents;
+}
+
+function toWorkspaceDocument(documentInfo) {
+  return {
+    documentId: documentInfo.id,
+    title: documentInfo.title,
+    storedFileName: documentInfo.storedFileName,
+    subject: documentInfo.subject,
+    unitName: documentInfo.unitName,
+    trustLevel: documentInfo.trustLevel,
+    createdAt: documentInfo.createdAt,
+  };
 }
 
 async function pingServer() {
@@ -1390,13 +1741,16 @@ async function openExistingSession(sessionId) {
   try {
     await fetchDocumentsCatalog();
 
-    const [session, messages, quizzes] = await Promise.all([
+    const [session, messages, quizzes, sessionDocuments] = await Promise.all([
       apiFetch(`/api/chat/sessions/${sessionId}`),
       apiFetch(`/api/chat/sessions/${sessionId}/messages`),
       apiFetch(`/api/chat/sessions/${sessionId}/quizzes`),
+      apiFetch(`/api/chat/sessions/${sessionId}/documents`),
     ]);
 
-    const documents = inferDocumentsForSession(messages, quizzes);
+    const documents = sessionDocuments.length
+      ? sessionDocuments.map(toWorkspaceDocument)
+      : inferDocumentsForSession(messages, quizzes);
     const currentDocumentId = documents[0]?.documentId || quizzes[0]?.documentId || null;
 
     state.currentSession = session;
@@ -1488,6 +1842,7 @@ async function createNewStudy(event) {
         title: document.getElementById("new-study-title").value.trim() || `${uploadResponse.title} 학습`,
       }),
     });
+    await apiFetch(`/api/chat/sessions/${session.id}/documents/${uploadResponse.documentId}`, { method: "POST" });
 
     await fetchDocumentsCatalog();
 
@@ -1541,6 +1896,7 @@ async function uploadWorkspacePdf(event) {
     uploadForm.append("trustLevel", document.getElementById("workspace-trust").value);
 
     const uploadResponse = await apiFetch("/api/rag/upload", { method: "POST", body: uploadForm });
+    await apiFetch(`/api/chat/sessions/${state.currentSession.id}/documents/${uploadResponse.documentId}`, { method: "POST" });
 
     state.currentWorkspace.documents.unshift({
       documentId: uploadResponse.documentId,
@@ -1614,6 +1970,7 @@ async function generateQuiz(event) {
     if (!documentIds.length) throw new Error("문제 생성에 사용할 PDF를 하나 이상 체크해 주세요.");
     const documentId = documentIds[0];
     const params = new URLSearchParams({
+      sessionId: state.currentSession.id,
       type: document.getElementById("quiz-type").value,
       count: document.getElementById("quiz-count").value,
     });
@@ -1635,6 +1992,7 @@ async function generateQuiz(event) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         documentId,
+        documentIds: normalizeDocumentIdSet(documentIds),
         quizSetTitle: `${quizSourceTitle || state.currentSession.title} 퀴즈 ${new Date().toLocaleTimeString("ko-KR")}`,
         questions,
       }),

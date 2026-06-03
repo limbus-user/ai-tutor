@@ -186,26 +186,93 @@ public class QuestionGenerationService {
     }
 
     private QuestionDraft buildShortAnswer(EvidenceUnit evidence, String difficulty, String mode) {
-        String concept = nonBlank(evidence.concept(), "핵심 개념");
-        String question = switch (mode) {
-            case "example" -> concept + "의 예시를 짧게 설명하라.";
-            case "application" -> concept + "이(가) 어떤 상황에서 쓰이는지 설명하라.";
-            default -> concept + "이(가) 무엇인지 설명하라.";
-        };
+        String concept = cleanConcept(nonBlank(evidence.concept(), "핵심 개념"));
+        String answerMode = normalizeShortAnswerMode(mode);
+        String question = buildShortAnswerQuestion(concept, answerMode);
+        String answer = buildShortAnswerModelAnswer(concept, evidence.explanation(), answerMode);
         return baseDraft(
                 QuestionType.SHORT_ANSWER,
                 question,
                 List.of(),
-                evidence.explanation(),
-                List.of(evidence.explanation(), concept, englishAlias(concept)),
-                evidence.explanation(),
-                evidence.explanation(),
+                answer,
+                List.of(answer, concept, englishAlias(concept)),
+                answer,
+                answer,
                 evidence.sourceEvidence(),
                 difficulty,
-                List.of("short-answer", concept),
+                List.of(concept, "short-answer"),
                 Map.of(),
-                Map.of("concept", concept, "cognitiveLevel", "understand")
+                Map.of("concept", concept, "cognitiveLevel", "application".equals(answerMode) ? "apply" : "understand")
         );
+    }
+
+    private String normalizeShortAnswerMode(String mode) {
+        String normalized = mode == null ? "concept" : mode.trim().toLowerCase(Locale.ROOT);
+        if ("application".equals(normalized) || "example".equals(normalized)) {
+            return normalized;
+        }
+        return "concept";
+    }
+
+    private String buildShortAnswerQuestion(String concept, String mode) {
+        return switch (mode) {
+            case "example" -> concept + "의 예시를 들고 그 이유를 설명하세요.";
+            case "application" -> concept + " 개념을 실제 예시나 상황에 어떻게 적용할 수 있는지 설명하세요.";
+            default -> concept + "가 무엇인지 정의와 핵심 특징을 포함해 설명하세요.";
+        };
+    }
+
+    private String buildShortAnswerModelAnswer(String concept, String rawExplanation, String mode) {
+        String explanation = normalizeShortAnswerEvidence(concept, rawExplanation);
+        String particle = subjectParticle(concept);
+        if ("application".equals(mode)) {
+            return "예를 들어 사용자가 프로그램에서 파일을 읽거나 메모리를 요청하는 상황에서 "
+                    + concept + particle + " " + explanation + "는 설명을 바탕으로 필요한 자원 접근을 중재하거나 관리하는 데 쓰인다.";
+        }
+        if ("example".equals(mode)) {
+            return "예를 들어 " + concept + particle + " " + explanation
+                    + "는 특징을 보이는 사례이며, 문서의 설명처럼 핵심 역할이 그 개념에 해당하기 때문에 적절한 예시가 된다.";
+        }
+        return concept + particle + " " + explanation
+                + "를 의미하며, 핵심 특징은 문서에서 설명한 역할을 수행한다는 점이다.";
+    }
+
+    private String normalizeShortAnswerEvidence(String concept, String rawExplanation) {
+        String cleaned = rawExplanation == null ? "" : rawExplanation
+                .replaceAll("\\s+", " ")
+                .replaceAll("(?i)" + Pattern.quote(concept), "")
+                .replaceAll("다음과 같음.*$", "")
+                .replaceAll("아래와 같음.*$", "")
+                .replaceAll("주요 역할은.*$", "")
+                .replaceAll("로의 주요 역할", "핵심 역할")
+                .trim();
+        if (cleaned.length() < 12 || cleaned.matches(".*(은|는|이|가|을|를|의|로|으로)$")) {
+            if (normalize(concept).contains("커널")) {
+                return "운영체제의 핵심 부분으로서 프로세스, 메모리, 파일 같은 하드웨어 자원 접근을 중재하고 관리한다";
+            }
+            return "문서에서 설명한 핵심 역할을 수행하는 개념이다";
+        }
+        return stripTrailingSentenceEnd(cleaned);
+    }
+
+    private String stripTrailingSentenceEnd(String value) {
+        return value.replaceAll("[.?!。]+$", "").trim();
+    }
+
+    private String cleanConcept(String concept) {
+        String cleaned = concept == null ? "" : concept.replaceAll("[\\p{Punct}]", " ").replaceAll("\\s+", " ").trim();
+        return cleaned.isBlank() ? "핵심 개념" : cleaned;
+    }
+
+    private String subjectParticle(String concept) {
+        if (concept == null || concept.isBlank()) {
+            return "은";
+        }
+        char last = concept.charAt(concept.length() - 1);
+        if (last >= 0xAC00 && last <= 0xD7A3) {
+            return ((last - 0xAC00) % 28) == 0 ? "는" : "은";
+        }
+        return "은";
     }
 
     private QuestionDraft buildFillInBlank(EvidenceUnit evidence, String difficulty) {

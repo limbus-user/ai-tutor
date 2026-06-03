@@ -17,6 +17,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -41,6 +43,7 @@ public class SessionQuizService {
         if (request.getDocumentId() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "documentId is required");
         }
+        List<Long> sourceDocumentIds = normalizeSourceDocumentIds(request);
         if (request.getQuestions() == null || request.getQuestions().isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "questions are required");
         }
@@ -52,7 +55,7 @@ public class SessionQuizService {
                 : abbreviate(request.getQuizSetTitle().trim(), 255);
 
         List<SessionQuiz> saved = sessionQuizRepository.saveAll(request.getQuestions().stream()
-                .map(question -> toEntity(session, request.getDocumentId(), quizSetId, quizSetTitle, question))
+                .map(question -> toEntity(session, request.getDocumentId(), sourceDocumentIds, quizSetId, quizSetTitle, question))
                 .toList());
 
         return saved.stream()
@@ -134,6 +137,7 @@ public class SessionQuizService {
     private SessionQuiz toEntity(
             ChatSession session,
             Long documentId,
+            List<Long> sourceDocumentIds,
             String quizSetId,
             String quizSetTitle,
             SessionQuizItemRequest question
@@ -141,6 +145,7 @@ public class SessionQuizService {
         return new SessionQuiz(
                 session,
                 documentId,
+                writeSourceDocumentIds(sourceDocumentIds),
                 quizSetId,
                 quizSetTitle,
                 question.getOrder(),
@@ -162,6 +167,30 @@ public class SessionQuizService {
             return objectMapper.writeValueAsString(question.getChoices() == null ? List.of() : question.getChoices());
         } catch (JsonProcessingException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Failed to serialize choices");
+        }
+    }
+
+    private List<Long> normalizeSourceDocumentIds(SessionQuizSaveRequest request) {
+        List<Long> documentIds = request.getDocumentIds() == null || request.getDocumentIds().isEmpty()
+                ? List.of(request.getDocumentId())
+                : request.getDocumentIds();
+        List<Long> normalized = new ArrayList<>(documentIds.stream()
+                .filter(documentId -> documentId != null && documentId > 0)
+                .distinct()
+                .toList());
+        Collections.sort(normalized);
+        if (!normalized.contains(request.getDocumentId())) {
+            normalized.add(request.getDocumentId());
+            Collections.sort(normalized);
+        }
+        return normalized;
+    }
+
+    private String writeSourceDocumentIds(List<Long> sourceDocumentIds) {
+        try {
+            return objectMapper.writeValueAsString(sourceDocumentIds == null ? List.of() : sourceDocumentIds);
+        } catch (JsonProcessingException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Failed to serialize source document ids");
         }
     }
 
@@ -270,24 +299,23 @@ public class SessionQuizService {
 
     private String buildEvaluationFeedback(SessionQuiz quiz, String submittedAnswer, boolean correct) {
         StringBuilder feedback = new StringBuilder();
-        feedback.append(correct ? "정답입니다." : "오답입니다.").append("\n");
-        feedback.append("내 답: ").append(submittedAnswer).append("\n");
-        feedback.append("정답: ").append(quiz.getCorrectAnswer()).append("\n");
+        feedback.append("답안 비교\n");
+        feedback.append("- 내 답: ").append(submittedAnswer).append("\n");
+        feedback.append("- 정답: ").append(quiz.getCorrectAnswer()).append("\n");
+        feedback.append("- 판정: ").append(correct ? "정답입니다." : "오답입니다.").append("\n\n");
 
-        if (quiz.getModelAnswer() != null && !quiz.getModelAnswer().isBlank()) {
-            feedback.append("모범답안: ").append(quiz.getModelAnswer()).append("\n");
-        }
+        feedback.append("핵심 피드백\n");
 
         if (correct) {
-            feedback.append("비교 피드백: 핵심 답안 요소가 정답과 일치합니다.");
+            feedback.append("답안의 핵심 개념과 표현이 정답 기준과 일치합니다.");
         } else if (hasMeaningfulOverlap(submittedAnswer, quiz)) {
-            feedback.append("비교 피드백: 일부 핵심 표현은 맞았지만 정답 기준과 완전히 일치하지 않습니다.");
+            feedback.append("일부 핵심 표현은 맞지만 정답 기준의 개념 연결이나 설명이 충분하지 않습니다.");
         } else {
-            feedback.append("비교 피드백: 정답의 핵심 개념이나 표현이 답안에 충분히 반영되지 않았습니다.");
+            feedback.append("정답의 핵심 개념이나 표현이 답안에 충분히 반영되지 않았습니다.");
         }
 
         if (quiz.getExplanation() != null && !quiz.getExplanation().isBlank()) {
-            feedback.append("\n해설: ").append(quiz.getExplanation());
+            feedback.append("\n\n해설\n").append(quiz.getExplanation());
         }
 
         return feedback.toString();
