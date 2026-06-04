@@ -2192,10 +2192,12 @@ public class RagService {
             }
             if ("ox".equals(type)) {
                 choices = List.of("O", "X");
-                question = buildOxQuestionText(question, selectOxStatementSource(question, modelAnswer, explanation, sourceEvidence));
-
                 String normalizedOxAnswer = normalizeOxAnswer(correctAnswer);
                 correctAnswer = normalizedOxAnswer.isBlank() ? "O" : normalizedOxAnswer;
+                question = buildOxQuestionText(
+                        question,
+                        selectOxStatementSource(question, modelAnswer, explanation, sourceEvidence, correctAnswer)
+                );
             }
 
 
@@ -2299,6 +2301,17 @@ public class RagService {
     }
 
     private String selectOxStatementSource(String question, String modelAnswer, String explanation, String sourceEvidence) {
+        return selectOxStatementSource(question, modelAnswer, explanation, sourceEvidence, "");
+    }
+
+    private String selectOxStatementSource(String question, String modelAnswer, String explanation, String sourceEvidence, String correctAnswer) {
+        if ("X".equals(normalizeOxAnswer(correctAnswer))) {
+            String questionStatement = extractOxStatement(question);
+            if (!isInvalidOxStatement(questionStatement)) {
+                return questionStatement;
+            }
+        }
+
         List<String> candidates = List.of(modelAnswer, explanation, sourceEvidence, question);
         for (String candidate : candidates) {
             String normalized = normalizeWhitespace(candidate);

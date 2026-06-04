@@ -1026,6 +1026,12 @@ function renderQuizSummary(board, quizzes) {
           </section>
         </section>
 
+
+        <section class="summary-panel dashboard-compact-panel dashboard-review-panel">
+          <h3>추천 복습 목록</h3>
+          ${wrongQuestions ? `<ul class="summary-review-list">${wrongQuestions}</ul>` : '<p class="summary-copy">틀린 문제가 없습니다. 현재 개념 흐름을 유지하며 다음 단원으로 넘어가도 됩니다.</p>'}
+        </section>
+
         <section class="summary-panel ai-final-feedback-card">
           <div class="ai-final-feedback-head">
             <span>AI</span>
@@ -1036,12 +1042,6 @@ function renderQuizSummary(board, quizzes) {
           </div>
           <p class="summary-copy summary-feedback-copy">${analysis.feedback}</p>
         </section>
-
-        <section class="summary-panel dashboard-compact-panel">
-          <h3>추천 복습 목록</h3>
-          ${wrongQuestions ? `<ul class="summary-review-list">${wrongQuestions}</ul>` : '<p class="summary-copy">틀린 문제가 없습니다. 현재 개념 흐름을 유지하며 다음 단원으로 넘어가도 됩니다.</p>'}
-        </section>
-
         <section class="summary-panel comparison-entry-card">
           <div>
             <p class="eyebrow">Feedback Compare</p>
@@ -1052,6 +1052,7 @@ function renderQuizSummary(board, quizzes) {
           <small>${comparisonSets.length > 1 ? `비교 가능한 결과 ${comparisonSets.length}개` : "비교 가능한 이전 결과 없음"}</small>
         </section>
       </div>
+
 
       <div class="quiz-summary-actions">
         <button type="button" class="secondary-button quiz-reset-all-button">문제들 다시풀기</button>
@@ -1167,6 +1168,19 @@ function renderComparisonDetail(current, previous) {
       ${renderComparisonColumn("현재 결과", current)}
       ${renderComparisonColumn("이전 결과", previous)}
     </div>
+    <section class="comparison-radar-compare">
+      <div>
+        <strong>이해 단계 삼각형 비교</strong>
+        <p>현재 결과와 이전 결과의 단계별 정답률을 같은 삼각형 위에 겹쳐서 봅니다.</p>
+      </div>
+      <div class="comparison-radar-compare-chart">
+        ${buildRadarComparisonSvg(current.stageResults || [], previous.stageResults || [])}
+      </div>
+      <div class="comparison-radar-legend">
+        <span><i class="current"></i>현재</span>
+        <span><i class="previous"></i>이전</span>
+      </div>
+    </section>
     <div class="comparison-delta-grid">
       ${renderDeltaCard("전체 정답률", current.accuracy, previous.accuracy)}
       ${renderDeltaCard("개념 이해", stageRateFromSummary(current, "CONCEPT_UNDERSTANDING"), stageRateFromSummary(previous, "CONCEPT_UNDERSTANDING"))}
@@ -1184,9 +1198,13 @@ function renderComparisonColumn(label, summary) {
       <h4>${summary?.quizSetTitle || "퀴즈 세트"}</h4>
       <div class="comparison-score"><strong>${summary?.accuracy ?? 0}%</strong><span>${summary?.correctCount ?? 0}/${summary?.totalCount ?? 0} 정답</span></div>
       <div class="comparison-stage-mini">
-        ${["CONCEPT_UNDERSTANDING", "CONCEPT_DISTINCTION", "CONCEPT_APPLICATION"].map((level) => `
-          <div><span>${formatUnderstandingLevelLabel(level)}</span><strong>${stageRateFromSummary(summary, level)}%</strong></div>
-        `).join("")}
+        ${["CONCEPT_UNDERSTANDING", "CONCEPT_DISTINCTION", "CONCEPT_APPLICATION"].map((level) =>
+          renderComparisonStageGauge(
+            formatUnderstandingLevelLabel(level),
+            stageRateFromSummary(summary, level),
+            summary?.isCurrent ? "current" : "previous"
+          )
+        ).join("")}
       </div>
       <div class="comparison-top-concepts">
         <strong>부족 개념 TOP</strong>
@@ -1198,6 +1216,21 @@ function renderComparisonColumn(label, summary) {
         <p>${summarizeFeedback(summary?.feedback || "")}</p>
       </div>
     </section>
+  `;
+}
+
+function renderComparisonStageGauge(label, rate, variant) {
+  const safeRate = Math.max(0, Math.min(100, Number(rate) || 0));
+  return `
+    <div class="comparison-stage-gauge ${variant}">
+      <div class="comparison-stage-gauge-head">
+        <span>${label}</span>
+        <strong>${safeRate}%</strong>
+      </div>
+      <div class="comparison-stage-gauge-track" aria-hidden="true">
+        <i style="width: ${safeRate}%"></i>
+      </div>
+    </div>
   `;
 }
 
@@ -1487,6 +1520,52 @@ function buildRadarChartSvg(stageResults) {
       ${axes}
       <polygon points="${dataPolygon}" class="radar-shape" />
       ${pointDots}
+    </svg>
+  `;
+}
+
+function buildRadarComparisonSvg(currentStageResults, previousStageResults) {
+  const currentValues = [
+    findStageRate(currentStageResults, "CONCEPT_UNDERSTANDING"),
+    findStageRate(currentStageResults, "CONCEPT_APPLICATION"),
+    findStageRate(currentStageResults, "CONCEPT_DISTINCTION"),
+  ];
+  const previousValues = [
+    findStageRate(previousStageResults, "CONCEPT_UNDERSTANDING"),
+    findStageRate(previousStageResults, "CONCEPT_APPLICATION"),
+    findStageRate(previousStageResults, "CONCEPT_DISTINCTION"),
+  ];
+  const centerX = 140;
+  const centerY = 128;
+  const radius = 88;
+  const levels = [0.25, 0.5, 0.75, 1];
+  const baseAngles = [-90, 30, 150];
+
+  const polygons = levels.map((ratio) => {
+    const points = baseAngles.map((angle) => formatPoint(polarPoint(centerX, centerY, radius * ratio, angle))).join(" ");
+    return `<polygon points="${points}" class="radar-grid" />`;
+  }).join("");
+  const axes = baseAngles.map((angle) => {
+    const point = polarPoint(centerX, centerY, radius, angle);
+    return `<line x1="${centerX}" y1="${centerY}" x2="${point.x}" y2="${point.y}" class="radar-axis" />`;
+  }).join("");
+  const currentPoints = currentValues.map((value, index) => polarPoint(centerX, centerY, radius * (value / 100), baseAngles[index]));
+  const previousPoints = previousValues.map((value, index) => polarPoint(centerX, centerY, radius * (value / 100), baseAngles[index]));
+  const labels = [
+    { x: 140, y: 20, text: `이해 ${currentValues[0]}% / ${previousValues[0]}%` },
+    { x: 232, y: 186, text: `적용 ${currentValues[1]}% / ${previousValues[1]}%` },
+    { x: 48, y: 186, text: `구분 ${currentValues[2]}% / ${previousValues[2]}%` },
+  ].map((label) => `<text x="${label.x}" y="${label.y}" text-anchor="middle" class="radar-compare-label">${label.text}</text>`).join("");
+
+  return `
+    <svg viewBox="0 0 280 230" class="radar-svg radar-comparison-svg" aria-hidden="true">
+      ${polygons}
+      ${axes}
+      <polygon points="${previousPoints.map((point) => formatPoint(point)).join(" ")}" class="radar-shape radar-shape-previous" />
+      <polygon points="${currentPoints.map((point) => formatPoint(point)).join(" ")}" class="radar-shape radar-shape-current" />
+      ${previousPoints.map((point) => `<circle cx="${point.x}" cy="${point.y}" r="3" class="radar-point radar-point-previous" />`).join("")}
+      ${currentPoints.map((point) => `<circle cx="${point.x}" cy="${point.y}" r="3.5" class="radar-point radar-point-current" />`).join("")}
+      ${labels}
     </svg>
   `;
 }
@@ -2064,9 +2143,38 @@ async function onSignup(event) {
   }
 }
 
+async function onFeedbackSubmit(event) {
+  event.preventDefault();
+  const button = event.currentTarget.querySelector('button[type="submit"]');
+  button.disabled = true;
+  clearAuthFeedback();
+
+  try {
+    const emailInput = document.getElementById("feedback-email");
+    const messageInput = document.getElementById("feedback-message");
+    await apiFetch("/api/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: emailInput.value,
+        category: document.getElementById("feedback-category").value,
+        message: messageInput.value,
+      }),
+    });
+    messageInput.value = "";
+    showAuthFeedback("피드백이 접수되었습니다. 확인 후 개선에 반영하겠습니다.");
+  } catch (error) {
+    showAuthFeedback(formatErrorMessage(error, "피드백을 제출하지 못했습니다."), true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function showSignupForm() {
   document.getElementById("login-form").classList.add("hidden");
   document.getElementById("show-signup-button").classList.add("hidden");
+  document.getElementById("show-feedback-button").classList.add("hidden");
+  document.getElementById("feedback-form").classList.add("hidden");
   document.getElementById("signup-form").classList.remove("hidden");
 }
 
@@ -2074,11 +2182,25 @@ function hideSignupForm() {
   document.getElementById("signup-form").classList.add("hidden");
   document.getElementById("login-form").classList.remove("hidden");
   document.getElementById("show-signup-button").classList.remove("hidden");
+  document.getElementById("show-feedback-button").classList.remove("hidden");
+}
+
+function showFeedbackForm() {
+  document.getElementById("signup-form").classList.add("hidden");
+  document.getElementById("login-form").classList.remove("hidden");
+  document.getElementById("feedback-form").classList.remove("hidden");
+  document.getElementById("show-feedback-button").classList.add("hidden");
+}
+
+function hideFeedbackForm() {
+  document.getElementById("feedback-form").classList.add("hidden");
+  document.getElementById("show-feedback-button").classList.remove("hidden");
 }
 
 function logoutToAuth() {
   clearAuth();
   hideSignupForm();
+  hideFeedbackForm();
   showView("auth");
 }
 
@@ -2101,8 +2223,11 @@ async function initializeApp() {
 
 document.getElementById("login-form").addEventListener("submit", (event) => void onLogin(event));
 document.getElementById("signup-form").addEventListener("submit", (event) => void onSignup(event));
+document.getElementById("feedback-form").addEventListener("submit", (event) => void onFeedbackSubmit(event));
 document.getElementById("show-signup-button").addEventListener("click", showSignupForm);
 document.getElementById("hide-signup-button").addEventListener("click", hideSignupForm);
+document.getElementById("show-feedback-button").addEventListener("click", showFeedbackForm);
+document.getElementById("hide-feedback-button").addEventListener("click", hideFeedbackForm);
 document.getElementById("logout-button").addEventListener("click", logoutToAuth);
 document.getElementById("workspace-logout-button").addEventListener("click", logoutToAuth);
 document.getElementById("quiz-logout-button").addEventListener("click", logoutToAuth);
