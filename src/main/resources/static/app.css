@@ -130,6 +130,16 @@ label {
     display: block;
 }
 
+#auth-view {
+    min-height: calc(100vh - 28px);
+    display: none;
+}
+
+#auth-view.active {
+    display: grid;
+    place-items: center;
+}
+
 .hidden {
     display: none !important;
 }
@@ -144,7 +154,8 @@ label {
 }
 
 .auth-layout {
-    min-height: calc(100vh - 28px);
+    width: min(100%, 1180px);
+    min-height: min(760px, calc(100vh - 28px));
     display: grid;
     grid-template-columns: 1.1fr 0.9fr;
     gap: 14px;
@@ -164,7 +175,7 @@ label {
 }
 
 .auth-hero {
-    padding: 40px;
+    padding: clamp(28px, 4vw, 48px);
     display: flex;
     flex-direction: column;
     justify-content: center;
@@ -173,17 +184,50 @@ label {
         linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(247, 249, 255, 0.9));
 }
 
+.auth-logo-lockup {
+    display: flex;
+    align-items: center;
+    gap: 22px;
+    min-width: 0;
+}
+
+.auth-logo-mark {
+    display: grid;
+    width: clamp(86px, 8vw, 128px);
+    height: clamp(86px, 8vw, 128px);
+    place-items: center;
+    border-radius: 30px;
+    color: #ffffff;
+    background:
+        radial-gradient(circle at 28% 24%, rgba(255, 255, 255, 0.34), transparent 30%),
+        linear-gradient(135deg, #111827 0%, #2864ed 100%);
+    box-shadow: 0 26px 54px rgba(40, 100, 237, 0.22);
+    flex: 0 0 auto;
+}
+
+.auth-logo-mark svg {
+    width: 66%;
+    height: 66%;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.65;
+}
+
 .auth-hero h1 {
     margin: 0;
-    max-width: 10ch;
+    max-width: none;
     font-family: var(--font-display);
-    font-size: clamp(2.4rem, 4vw, 4.4rem);
-    line-height: 1.02;
-    letter-spacing: -0.04em;
+    font-size: clamp(2.8rem, 5vw, 5.6rem);
+    line-height: 0.96;
+    letter-spacing: -0.075em;
+    color: #111827;
+    white-space: nowrap;
 }
 
 .auth-copy {
-    margin: 18px 0 0;
+    margin: 28px 0 0;
     max-width: 600px;
     color: var(--muted);
     line-height: 1.7;
@@ -207,7 +251,7 @@ label {
 }
 
 .auth-panel {
-    padding: 28px;
+    padding: clamp(24px, 3vw, 38px);
     display: flex;
     flex-direction: column;
     justify-content: center;
@@ -593,7 +637,8 @@ label {
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
-    padding-right: 2px;
+    padding: 4px 8px 12px 4px;
+    margin: -4px -8px -12px -4px;
 }
 
 .message-bubble {
@@ -1898,6 +1943,35 @@ label {
 }
 
 @media (max-width: 1180px) {
+    .auth-layout {
+        max-width: 680px;
+        min-height: 0;
+        grid-template-columns: 1fr;
+    }
+
+    .auth-hero,
+    .auth-panel {
+        min-height: 0;
+    }
+
+    .auth-hero {
+        justify-content: flex-start;
+    }
+
+    .auth-logo-lockup {
+        align-items: center;
+    }
+
+    .auth-logo-mark {
+        width: 76px;
+        height: 76px;
+        border-radius: 22px;
+    }
+
+    .auth-hero h1 {
+        font-size: clamp(2.8rem, 8vw, 4.8rem);
+    }
+
     .workspace-grid {
         grid-template-columns: 1fr;
         height: auto;
@@ -2111,6 +2185,20 @@ label {
     color: #65738d;
     text-align: center;
     background: #fbfcff;
+    transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+.workspace-dropzone.drag-over {
+    border-color: #2864ed;
+    background: #f4f8ff;
+    box-shadow: 0 0 0 4px rgba(40, 100, 237, 0.08);
+    transform: translateY(-1px);
+}
+
+.workspace-dropzone.invalid-drop {
+    border-color: #ef4453;
+    background: #fff7f8;
+    box-shadow: 0 0 0 4px rgba(239, 68, 83, 0.08);
 }
 
 .workspace-dropzone > span:not(.dropzone-icon),
@@ -2144,6 +2232,18 @@ label {
     font-size: 0.8rem;
 }
 
+.dropzone-file-name {
+    display: block;
+    max-width: 100%;
+    color: #2864ed;
+    font-size: 0.76rem;
+    font-style: normal;
+    font-weight: 800;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .workspace-upload-options {
     display: none;
 }
@@ -2175,12 +2275,20 @@ label {
     margin-top: 0;
 }
 
+#workspace-view .document-list,
+#workspace-view .quiz-list {
+    padding: 6px 10px 14px 6px;
+    margin: -6px -10px -14px -6px;
+}
+
 #workspace-view .document-row {
     min-height: 104px;
     padding: 12px 9px;
     border: 1px solid #d8e1f0;
     border-radius: 11px;
     overflow: visible;
+    transform: none;
+    min-width: 0;
 }
 
 #workspace-view .document-row.selected {
@@ -2213,6 +2321,29 @@ label {
 
 #workspace-view .document-row-copy .document-name {
     font-size: 0.92rem;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+
+#workspace-view .document-row-open,
+#workspace-view .quiz-set-open {
+    min-width: 0;
+}
+
+#workspace-view .document-row-icon,
+#workspace-view .quiz-set-icon {
+    flex: 0 0 auto;
+}
+
+#workspace-view .document-row-copy,
+#workspace-view .quiz-set-copy {
+    min-width: 0;
+    max-width: 100%;
 }
 
 .document-meta-tags {
@@ -2324,8 +2455,25 @@ label {
 
 .chat-attach-icon {
     display: grid;
+    width: 34px;
+    height: 34px;
     place-items: center;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    background: transparent;
     color: #7a879b;
+    box-shadow: none;
+    min-width: 0;
+}
+
+.chat-attach-icon:hover,
+.chat-attach-icon:focus-visible {
+    color: #2864ed;
+    border-color: #d8e4ff;
+    background: #f4f8ff;
+    box-shadow: none;
+    transform: none;
 }
 
 #workspace-view .chat-form button {
@@ -2335,6 +2483,11 @@ label {
     min-width: 92px;
     border-radius: 7px;
     background: #2864ed;
+}
+
+#workspace-view .chat-form .chat-attach-icon {
+    min-width: 34px;
+    background: transparent;
 }
 
 .chat-form-actions button svg {
@@ -2413,6 +2566,47 @@ label {
 #workspace-view .quiz-set-card {
     border-color: #e0e6ef;
     border-radius: 10px;
+    transform: none;
+    min-width: 0;
+}
+
+#workspace-view .quiz-set-title {
+    max-width: 100%;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+
+#workspace-view .quiz-set-meta,
+#workspace-view .document-uploaded-at {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#workspace-view .document-row-open,
+#workspace-view .quiz-set-open {
+    background: transparent !important;
+    border-color: transparent !important;
+    box-shadow: none !important;
+    transform: none !important;
+}
+
+#workspace-view .document-row-open:hover,
+#workspace-view .document-row-open:focus,
+#workspace-view .document-row-open:focus-visible,
+#workspace-view .quiz-set-open:hover,
+#workspace-view .quiz-set-open:focus,
+#workspace-view .quiz-set-open:focus-visible {
+    background: transparent !important;
+    border-color: transparent !important;
+    box-shadow: none !important;
+    outline: none;
+    transform: none !important;
 }
 
 #workspace-view .quiz-set-icon {
@@ -2702,6 +2896,7 @@ body {
 .quiz-comparison-screen {
     display: grid;
     gap: 16px;
+    min-width: 0;
 }
 
 .comparison-screen-header {
@@ -2714,23 +2909,28 @@ body {
     grid-template-columns: minmax(240px, 0.36fr) minmax(0, 1fr);
     gap: 15px;
     align-items: stretch;
+    min-width: 0;
 }
 
 .comparison-list-panel,
 .comparison-detail-panel {
     margin-top: 0;
+    min-width: 0;
+    overflow: hidden;
 }
 
 .comparison-result-list {
     display: grid;
     gap: 10px;
     margin-top: 14px;
+    min-width: 0;
 }
 
 .comparison-result-item {
     display: grid;
     gap: 5px;
     width: 100%;
+    min-width: 0;
     padding: 13px 14px;
     text-align: left;
     border: 1px solid var(--line);
@@ -2754,21 +2954,35 @@ body {
 .comparison-result-item small {
     color: var(--muted);
     font-size: 0.78rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .comparison-vs-grid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
     gap: 15px;
     align-items: stretch;
+    min-width: 0;
 }
 
 .comparison-column {
+    display: grid;
+    grid-template-rows: auto auto minmax(2.7em, auto) auto auto auto minmax(0, 1fr);
+    align-content: start;
     padding: 16px;
     border: 1px solid var(--line);
     border-radius: 18px;
     background: #ffffff;
-    min-height: 100%;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.comparison-column:not(.current)::after {
+    content: "";
+    display: block;
+    height: 0;
 }
 
 .comparison-column.current {
@@ -2779,7 +2993,7 @@ body {
 .current-result-badge,
 .current-feedback-label {
     display: inline-flex;
-    width: fit-content;
+    max-width: 100%;
     align-items: center;
     gap: 6px;
     border-radius: 999px;
@@ -2787,6 +3001,8 @@ body {
     color: #2864ed;
     font-size: 0.78rem;
     font-weight: 850;
+    overflow-wrap: anywhere;
+    white-space: normal;
 }
 
 .current-result-badge {
@@ -2804,16 +3020,24 @@ body {
     color: var(--muted);
     font-size: 0.86rem;
     font-weight: 800;
+    overflow-wrap: anywhere;
+}
+
+.comparison-column:not(.current) > p {
+    margin-bottom: 36px;
 }
 
 .comparison-column h4 {
     margin: 8px 0 13px;
     font-size: 1rem;
+    overflow-wrap: anywhere;
+    min-height: 2.7em;
 }
 
 .comparison-score {
     display: flex;
     align-items: flex-end;
+    flex-wrap: wrap;
     gap: 8px;
     padding-bottom: 12px;
     border-bottom: 1px solid #edf1f7;
@@ -2844,6 +3068,7 @@ body {
 .comparison-stage-gauge {
     display: grid;
     gap: 8px;
+    min-width: 0;
     padding: 9px 10px;
     border-radius: 12px;
     background: var(--panel-soft);
@@ -2854,10 +3079,17 @@ body {
     justify-content: space-between;
     gap: 12px;
     align-items: center;
+    min-width: 0;
 }
 
 .comparison-stage-gauge-head strong {
     color: #111827;
+    flex: 0 0 auto;
+}
+
+.comparison-stage-gauge-head span {
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .comparison-stage-gauge-track {
@@ -2890,9 +3122,10 @@ body {
 
 .comparison-radar-compare {
     display: grid;
-    grid-template-columns: minmax(0, 0.9fr) minmax(260px, 1.1fr) auto;
+    grid-template-columns: minmax(0, 0.9fr) minmax(220px, 1.1fr) auto;
     gap: 15px;
     align-items: center;
+    min-width: 0;
     margin-top: 15px;
     padding: 16px;
     border: 1px solid #d8e3f7;
@@ -2904,9 +3137,11 @@ body {
     margin: 6px 0 0;
     color: var(--muted);
     line-height: 1.55;
+    overflow-wrap: anywhere;
 }
 
 .comparison-radar-compare-chart {
+    min-width: 0;
     min-height: 230px;
     display: grid;
     place-items: center;
@@ -2979,24 +3214,34 @@ body {
 .comparison-top-concepts,
 .comparison-feedback-summary {
     margin-top: 14px;
+    display: grid;
+    grid-template-rows: auto auto minmax(3.3em, 1fr);
+    align-content: start;
+}
+
+.comparison-column:not(.current) .comparison-feedback-summary strong {
+    margin-bottom: 33px;
 }
 
 .comparison-top-concepts p,
 .comparison-feedback-summary p {
     margin: 7px 0 0;
     line-height: 1.65;
+    overflow-wrap: anywhere;
 }
 
 .comparison-delta-grid {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
     gap: 11px;
     margin-top: 15px;
+    min-width: 0;
 }
 
 .comparison-delta-card {
     display: grid;
     gap: 5px;
+    min-width: 0;
     padding: 13px;
     border-radius: 14px;
     background: var(--panel-soft);
@@ -3006,6 +3251,7 @@ body {
 .comparison-delta-card span,
 .comparison-delta-card small {
     color: var(--muted);
+    overflow-wrap: anywhere;
 }
 
 .comparison-delta-card strong {
@@ -3047,7 +3293,15 @@ body {
 .session-card:hover,
 .document-row:hover,
 .quiz-set-card:hover {
-    box-shadow: 0 12px 28px rgba(42, 57, 88, 0.08);
+    box-shadow: 0 0 0 1px rgba(47, 109, 255, 0.08), 0 8px 18px rgba(42, 57, 88, 0.06);
+}
+
+#workspace-view .document-row:hover,
+#workspace-view .quiz-set-card:hover {
+    transform: none;
+    border-color: #2f6dff;
+    background: #ffffff;
+    box-shadow: none;
 }
 
 @media (min-width: 701px) {
@@ -3068,11 +3322,26 @@ body {
 }
 
 @media (max-width: 920px) {
+    .auth-logo-lockup {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    .auth-logo-mark {
+        width: 82px;
+        height: 82px;
+        border-radius: 24px;
+    }
+
+    .auth-hero h1 {
+        font-size: clamp(2.8rem, 12vw, 4.6rem);
+        white-space: normal;
+    }
+
     .quiz-result-dashboard .summary-top-metrics,
     .dashboard-grid,
     .comparison-layout,
-    .comparison-vs-grid,
-    .comparison-delta-grid,
     .comparison-radar-compare {
         grid-template-columns: 1fr;
     }
@@ -3114,4 +3383,8 @@ body {
     .comparison-feedback-summary p {
         font-size: max(1rem, 15px);
     }
+}
+
+#auth-view.active {
+    zoom: 1;
 }

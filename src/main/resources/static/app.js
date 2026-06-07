@@ -2221,6 +2221,85 @@ async function initializeApp() {
   showView("auth");
 }
 
+function isPdfFile(file) {
+  if (!file) return false;
+  const fileName = (file.name || "").toLowerCase();
+  return file.type === "application/pdf" || fileName.endsWith(".pdf");
+}
+
+function setFileInputFile(fileInput, file) {
+  const dataTransfer = new DataTransfer();
+  dataTransfer.items.add(file);
+  fileInput.files = dataTransfer.files;
+  fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function updateDropzoneFileName(fileInput, fileNameElement) {
+  if (!fileInput || !fileNameElement) return;
+  fileNameElement.textContent = fileInput.files?.[0]?.name || "PDF 파일을 선택하거나 드래그하세요";
+}
+
+function showDropzoneInvalid(dropzone) {
+  dropzone.classList.add("invalid-drop");
+  window.setTimeout(() => dropzone.classList.remove("invalid-drop"), 900);
+}
+
+function setupPdfDropzone(dropzoneId, fileInputId, fileNameId) {
+  const dropzone = document.getElementById(dropzoneId);
+  const fileInput = document.getElementById(fileInputId);
+  const fileNameElement = document.getElementById(fileNameId);
+  if (!dropzone || !fileInput) return;
+
+  ["dragenter", "dragover"].forEach((eventName) => {
+    dropzone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      dropzone.classList.add("drag-over");
+    });
+  });
+
+  ["dragleave", "dragend"].forEach((eventName) => {
+    dropzone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      dropzone.classList.remove("drag-over");
+    });
+  });
+
+  dropzone.addEventListener("drop", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    dropzone.classList.remove("drag-over");
+
+    const file = event.dataTransfer?.files?.[0];
+    if (!file) return;
+
+    if (!isPdfFile(file)) {
+      fileInput.value = "";
+      updateDropzoneFileName(fileInput, fileNameElement);
+      showDropzoneInvalid(dropzone);
+      alert("PDF 파일만 업로드할 수 있습니다.");
+      return;
+    }
+
+    setFileInputFile(fileInput, file);
+  });
+
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files?.[0];
+    if (file && !isPdfFile(file)) {
+      fileInput.value = "";
+      updateDropzoneFileName(fileInput, fileNameElement);
+      showDropzoneInvalid(dropzone);
+      alert("PDF 파일만 업로드할 수 있습니다.");
+      return;
+    }
+    updateDropzoneFileName(fileInput, fileNameElement);
+  });
+}
+
+setupPdfDropzone("workspace-pdf-dropzone", "workspace-file", "workspace-pdf-file-name");
+
 document.getElementById("login-form").addEventListener("submit", (event) => void onLogin(event));
 document.getElementById("signup-form").addEventListener("submit", (event) => void onSignup(event));
 document.getElementById("feedback-form").addEventListener("submit", (event) => void onFeedbackSubmit(event));
@@ -2273,6 +2352,9 @@ document.getElementById("refresh-sessions-button").addEventListener("click", asy
 document.getElementById("new-study-form").addEventListener("submit", (event) => void createNewStudy(event));
 document.getElementById("workspace-upload-form").addEventListener("submit", (event) => void uploadWorkspacePdf(event));
 document.getElementById("chat-form").addEventListener("submit", (event) => void sendChat(event));
+document.getElementById("chat-attach-button").addEventListener("click", () => {
+  alert("곧 추가될 기능입니다.");
+});
 document.getElementById("quiz-form").addEventListener("submit", (event) => void generateQuiz(event));
 document.getElementById("dev-mode-toggle").addEventListener("click", () => {
   document.getElementById("dev-mode-panel").classList.toggle("hidden");
