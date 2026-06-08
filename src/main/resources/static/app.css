@@ -2696,7 +2696,7 @@ button {
 }
 
 .app-shell {
-    zoom: 1.08;
+    zoom: 1;
 }
 
 body {
@@ -3387,4 +3387,139 @@ body {
 
 #auth-view.active {
     zoom: 1;
+}
+
+/* Workspace responsive correction */
+#workspace-view .workspace-grid {
+    grid-template-areas: "documents chat quiz";
+    height: clamp(620px, calc(100vh - 168px), 900px);
+}
+
+#workspace-view .document-workspace-panel {
+    grid-area: documents;
+}
+
+#workspace-view .chat-panel {
+    grid-area: chat;
+}
+
+#workspace-view .quiz-workspace-panel {
+    grid-area: quiz;
+}
+
+@media (min-width: 861px) and (max-width: 1240px) {
+    #workspace-view .workspace-grid {
+        grid-template-columns: minmax(260px, 0.42fr) minmax(0, 1fr);
+        grid-template-areas:
+            "documents chat"
+            "quiz chat";
+        align-items: stretch;
+        height: auto;
+        min-height: 0;
+    }
+
+    #workspace-view .workspace-panel {
+        height: auto;
+        min-height: 0;
+    }
+
+    #workspace-view .chat-panel {
+        min-height: 620px;
+        height: clamp(620px, calc(100vh - 168px), 820px);
+    }
+
+    #workspace-view .document-list,
+    #workspace-view .quiz-list {
+        max-height: 320px;
+    }
+}
+
+@media (max-width: 860px) {
+    .app-shell {
+        width: min(calc(100% - 16px), 720px);
+        padding-top: 8px;
+    }
+
+    #workspace-view .workspace-brand {
+        padding: 4px 2px 10px;
+    }
+
+    #workspace-view .workspace-topbar {
+        min-height: 0;
+        padding: 14px;
+        gap: 12px;
+    }
+
+    #workspace-view .workspace-title-wrap {
+        align-items: flex-start;
+        gap: 10px;
+    }
+
+    #workspace-view .workspace-status {
+        align-self: flex-start;
+        margin-left: 0;
+    }
+
+    #workspace-view .workspace-grid {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+            "documents"
+            "chat"
+            "quiz";
+        gap: 12px;
+        height: auto;
+        min-height: 0;
+        margin-top: 12px;
+    }
+
+    #workspace-view .workspace-panel {
+        height: auto;
+        min-height: 0;
+        overflow: visible;
+        padding: 14px;
+    }
+
+    #workspace-view .chat-panel {
+        height: auto;
+        min-height: 520px;
+    }
+
+    #workspace-view .message-list {
+        min-height: 340px;
+        max-height: 52vh;
+    }
+
+    #workspace-view .document-list,
+    #workspace-view .quiz-list {
+        max-height: none;
+        overflow: visible;
+    }
+}
+
+@media (max-width: 560px) {
+    .app-shell {
+        width: calc(100% - 10px);
+    }
+
+    #workspace-view .workspace-topbar h1 {
+        font-size: 1.28rem;
+    }
+
+    #workspace-view .workspace-nav-button {
+        justify-content: center;
+        width: 100%;
+    }
+
+    #workspace-view .workspace-dropzone {
+        min-height: 118px;
+        padding: 14px;
+    }
+
+    #workspace-view .chat-panel {
+        min-height: 460px;
+    }
+
+    #workspace-view .message-list {
+        min-height: 280px;
+    }
 }
