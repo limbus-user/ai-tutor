@@ -14,6 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import com.gyeongtaekim.ai_tutor.dto.RagDocumentMetadataUpdateRequest;
 
 import java.net.MalformedURLException;
 import java.nio.file.Path;
@@ -53,6 +54,21 @@ public class RagController {
             @RequestBody RagDocumentTitleUpdateRequest request
     ) {
         return ResponseEntity.ok(ragService.renameDocument(documentId, request.getTitle()));
+    }
+
+
+
+    @PatchMapping("/documents/{documentId}/metadata")
+    public ResponseEntity<RagDocumentSummaryResponse> updateDocumentMetadata(
+            @PathVariable Long documentId,
+            @RequestBody RagDocumentMetadataUpdateRequest request
+    ) {
+        return ResponseEntity.ok(ragService.updateDocumentMetadata(
+                documentId,
+                request.getSubject(),
+                request.getUnitName(),
+                request.getTrustLevel()
+        ));
     }
 
     @DeleteMapping("/documents/{documentId}")

@@ -459,7 +459,16 @@ function renderUploadAnalysisCard(documentInfo) {
     event.stopPropagation();
     closeUploadAnalysis(documentInfo.analysisInputScope || "workspace");
   });
-  headerActions.append(applyButton, status, closeButton);
+
+  const saveMetadataButton = document.createElement("button");
+  saveMetadataButton.type = "button";
+  saveMetadataButton.textContent = "정보 수정";
+  saveMetadataButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    void editDocumentMetadata(documentInfo);
+  });
+
+  headerActions.append(applyButton, saveMetadataButton, status, closeButton);
   header.appendChild(headerActions);
   card.appendChild(header);
 
@@ -867,6 +876,72 @@ function renderDocuments() {
   renderWorkspaceHeader();
   renderLatestUploadAnalysis();
   renderQuizDocumentSelection();
+}
+
+async function editDocumentMetadata(documentInfo) {
+  if (!documentInfo?.documentId || String(documentInfo.documentId).includes("preview")) {
+    alert("미리보기 분석 결과는 저장할 수 없습니다. PDF를 업로드한 뒤 수정해 주세요.");
+    return;
+  }
+
+  const currentAnalysis = documentInfo.uploadAnalysis || {};
+
+  const subject = window.prompt(
+      "과목을 입력해 주세요.",
+      documentInfo.subject || currentAnalysis.inferredSubject || "",
+  );
+  if (subject === null) return;
+
+  const unitName = window.prompt(
+      "단원을 입력해 주세요.",
+      documentInfo.unitName || currentAnalysis.inferredUnit || "",
+  );
+  if (unitName === null) return;
+
+  const trustLevel = window.prompt(
+      "신뢰도를 입력해 주세요.",
+      documentInfo.trustLevel || currentAnalysis.confidence || "",
+  );
+  if (trustLevel === null) return;
+
+  try {
+    const updated = await apiFetch(`/api/rag/documents/${documentInfo.documentId}/metadata`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        subject,
+        unitName,
+        trustLevel,
+      }),
+    });
+
+    await fetchDocumentsCatalog();
+
+    state.currentWorkspace.documents = (state.currentWorkspace?.documents || []).map((document) =>
+        document.documentId === documentInfo.documentId
+            ? {
+              ...document,
+              subject: updated.subject,
+              unitName: updated.unitName,
+              trustLevel: updated.trustLevel,
+              uploadAnalysis: document.uploadAnalysis
+                  ? {
+                    ...document.uploadAnalysis,
+                    inferredSubject: updated.subject,
+                    inferredUnit: updated.unitName,
+                    confidence: updated.trustLevel,
+                  }
+                  : document.uploadAnalysis,
+            }
+            : document,
+    );
+
+    alert("문서 정보가 수정되었습니다.");
+    renderDocuments();
+    renderLatestUploadAnalysis();
+  } catch (error) {
+    alert(formatErrorMessage(error, "문서 정보를 수정하지 못했습니다."));
+  }
 }
 
 async function renameDocument(documentInfo) {
@@ -2393,9 +2468,21 @@ async function sendChat(event) {
     const question = questionInput.value.trim();
     if (!question) throw new Error("질문을 입력해 주세요.");
 
-    const payload = { question };
-
     const selectedDocumentIds = getSelectedQuizDocumentIds();
+
+    if (question === "!학습코스" && !selectedDocumentIds.length) {
+      throw new Error("학습 코스를 만들 PDF를 하나 이상 선택해 주세요.");
+    }
+
+    const payload = {
+      question,
+      documentIds: selectedDocumentIds,
+    };
+
+    if (selectedDocumentIds.length === 1) {
+      payload.documentId = selectedDocumentIds[0];
+    }
+
     if (selectedDocumentIds.length === 1) {
       payload.documentId = selectedDocumentIds[0];
     }
@@ -2778,3 +2865,4 @@ document.addEventListener("click", (event) => {
 });
 
 void initializeApp();
+

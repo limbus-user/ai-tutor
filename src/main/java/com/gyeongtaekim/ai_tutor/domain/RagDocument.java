@@ -69,6 +69,12 @@ public class RagDocument {
         this.title = title;
     }
 
+    public void updateMetadata(String subject, String unitName, String trustLevel) {
+        this.subject = subject;
+        this.unitName = unitName;
+        this.trustLevel = trustLevel;
+    }
+
     public enum SourceType {
         PDF, NOTE, PROBLEM_SET
     }

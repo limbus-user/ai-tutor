@@ -10,6 +10,7 @@ import com.gyeongtaekim.ai_tutor.dto.RagGeneratedQuestionsResponse;
 import com.gyeongtaekim.ai_tutor.dto.RagQueryResponse;
 import com.gyeongtaekim.ai_tutor.repository.DocumentChunkRepository;
 import com.gyeongtaekim.ai_tutor.repository.ChatSessionDocumentRepository;
+import com.gyeongtaekim.ai_tutor.repository.PgVectorChunkSearchRepository;
 import com.gyeongtaekim.ai_tutor.repository.RagDocumentRepository;
 import com.gyeongtaekim.ai_tutor.repository.SessionQuizRepository;
 import dev.langchain4j.data.document.Document;
@@ -83,8 +84,10 @@ public class RagService {
     private final RagDocumentRepository ragDocumentRepository;
     private final DocumentChunkRepository documentChunkRepository;
     private final ChatSessionDocumentRepository chatSessionDocumentRepository;
+    private final PgVectorChunkSearchRepository pgVectorChunkSearchRepository;
     private final SessionQuizRepository sessionQuizRepository;
     private final OllamaService ollamaService;
+    private final PdfVisualAnalysisService pdfVisualAnalysisService;
 
     private final InMemoryEmbeddingStore<DocumentChunk> embeddingStore = new InMemoryEmbeddingStore<>();
     private volatile boolean embeddingsInitialized = false;
@@ -125,11 +128,14 @@ public class RagService {
             String metadata = "subject=" + ragDocument.getSubject()
                     + ", unit=" + ragDocument.getUnitName()
                     + ", source=" + ragDocument.getStoredFileName()
-                    + ", chunkIndex=" + i;
+                    + ", chunkIndex=" + i
+                    + ", chunkType=TEXT"
+                    + ", sourceType=PDF_TEXT";
             chunks.add(new DocumentChunk(ragDocument, i, segments.get(i).text(), metadata));
         }
+        addVisualChunks(file.getBytes(), ragDocument, chunks);
         documentChunkRepository.saveAll(chunks);
-        addChunksToEmbeddingStore(chunks);
+        storeChunkEmbeddings(chunks);
 
         DocumentUploadAnalysis analysis = analyzeUploadedDocument(ragDocument, chunks, text);
         return new RagDocumentUploadResponse(
@@ -172,7 +178,7 @@ public class RagService {
                     previewDocument,
                     i,
                     segments.get(i).text(),
-                    "source=" + originalFileName + ", chunkIndex=" + i + ", preview=true"
+                    "source=" + originalFileName + ", chunkIndex=" + i + ", preview=true, chunkType=TEXT, sourceType=PDF_TEXT"
             ));
         }
 
@@ -188,8 +194,85 @@ public class RagService {
         );
     }
 
+    private void addVisualChunks(byte[] pdfBytes, RagDocument ragDocument, List<DocumentChunk> chunks) {
+        List<PdfVisualAnalysisService.VisualAnalysisResult> visualResults = pdfVisualAnalysisService.analyze(pdfBytes);
+        for (PdfVisualAnalysisService.VisualAnalysisResult visualResult : visualResults) {
+            int chunkIndex = chunks.size();
+            chunks.add(new DocumentChunk(
+                    ragDocument,
+                    chunkIndex,
+                    visualResult.toChunkText(),
+                    buildVisualChunkMetadata(ragDocument, visualResult, chunkIndex)
+            ));
+        }
+    }
+
+    private String buildVisualChunkMetadata(
+            RagDocument ragDocument,
+            PdfVisualAnalysisService.VisualAnalysisResult visualResult,
+            int chunkIndex
+    ) {
+        return "subject=" + ragDocument.getSubject()
+                + ", unit=" + ragDocument.getUnitName()
+                + ", source=" + ragDocument.getStoredFileName()
+                + ", chunkIndex=" + chunkIndex
+                + ", chunkType=" + visualResult.chunkType()
+                + ", pageNumber=" + visualResult.pageNumber()
+                + ", sourceType=GPT_VISION"
+                + ", confidence=" + visualResult.confidence()
+                + ", title=" + sanitizeMetadataValue(visualResult.title());
+    }
+
+    private String sanitizeMetadataValue(String value) {
+        return value == null ? "" : value.replace(",", " ").replace("\n", " ").replace("\r", " ").trim();
+    }
+
     public RagQueryResponse query(String query) {
-        return query(query, null);
+        return query(query, (Long) null);
+    }
+
+
+    public RagQueryResponse query(String query, List<Long> documentIds) {
+        if (documentIds == null || documentIds.isEmpty()) {
+            return query(query, (Long) null);
+        }
+
+        List<DocumentChunk> allChunks = documentIds.stream()
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .flatMap(documentId -> documentChunkRepository.findByDocumentIdOrderByChunkIndexAsc(documentId).stream())
+                .toList();
+
+        if (allChunks.isEmpty()) {
+            return new RagQueryResponse(
+                    query,
+                    "선택된 PDF에서 검색 가능한 문서 근거를 찾지 못했습니다.",
+                    List.of()
+            );
+        }
+
+        List<DocumentChunk> topChunks = retrieveRelevantChunks(query, allChunks, null, documentIds);
+        if (topChunks.isEmpty()) {
+            return new RagQueryResponse(
+                    query,
+                    "선택된 PDF에서 질문과 직접 관련된 근거를 찾지 못했습니다.",
+                    List.of()
+            );
+        }
+
+        List<String> evidence = buildAnswerEvidence(query, topChunks);
+        List<String> sources = topChunks.stream()
+                .map(this::formatChunkSource)
+                .distinct()
+                .toList();
+
+        String answer = evidence.isEmpty()
+                ? topChunks.stream()
+                        .map(DocumentChunk::getChunkText)
+                        .collect(Collectors.joining("\n\n"))
+                : String.join("\n", evidence);
+
+        return new RagQueryResponse(query, answer, sources);
     }
 
     public RagDocumentUploadResponse analyzeDocument(Long documentId) {
@@ -219,7 +302,7 @@ public class RagService {
             );
         }
 
-        List<DocumentChunk> topChunks = retrieveRelevantChunks(query, allChunks);
+        List<DocumentChunk> topChunks = retrieveRelevantChunks(query, allChunks, documentId, List.of());
         if (topChunks.isEmpty()) {
             return new RagQueryResponse(
                     query,
@@ -230,7 +313,7 @@ public class RagService {
 
         List<String> evidence = buildAnswerEvidence(query, topChunks);
         List<String> sources = topChunks.stream()
-                .map(chunk -> chunk.getDocument().getTitle() + " [chunk " + chunk.getChunkIndex() + "]")
+                .map(this::formatChunkSource)
                 .distinct()
                 .toList();
 
@@ -323,6 +406,25 @@ public class RagService {
 
         RagDocument document = getDocument(documentId);
         document.updateTitle(title.trim());
+        return new RagDocumentSummaryResponse(ragDocumentRepository.save(document));
+    }
+
+
+    @Transactional
+    public RagDocumentSummaryResponse updateDocumentMetadata(
+            Long documentId,
+            String subject,
+            String unitName,
+            String trustLevel
+    ) {
+        RagDocument document = getDocument(documentId);
+
+        document.updateMetadata(
+                defaultValue(subject, document.getSubject()),
+                defaultValue(unitName, document.getUnitName()),
+                defaultValue(trustLevel, document.getTrustLevel())
+        );
+
         return new RagDocumentSummaryResponse(ragDocumentRepository.save(document));
     }
 
@@ -871,8 +973,12 @@ public class RagService {
     }
 
     private List<DocumentChunk> retrieveRelevantChunks(String query, List<DocumentChunk> allChunks) {
+        return retrieveRelevantChunks(query, allChunks, null, List.of());
+    }
+
+    private List<DocumentChunk> retrieveRelevantChunks(String query, List<DocumentChunk> allChunks, Long documentId, List<Long> documentIds) {
         List<String> tokens = extractSearchTokens(query);
-        Map<Long, Double> embeddingScores = retrieveWithEmbeddings(query, allChunks);
+        Map<Long, Double> embeddingScores = retrieveWithEmbeddings(query, allChunks, documentId, documentIds);
 
         List<ScoredChunk> ranked = allChunks.stream()
                 .map(chunk -> new ScoredChunk(
@@ -890,9 +996,14 @@ public class RagService {
         return diversifyTopChunks(ranked, RETRIEVAL_TOP_K);
     }
 
-    private Map<Long, Double> retrieveWithEmbeddings(String query, List<DocumentChunk> candidateChunks) {
+    private Map<Long, Double> retrieveWithEmbeddings(String query, List<DocumentChunk> candidateChunks, Long documentId, List<Long> documentIds) {
         if (!embeddingEnabled()) {
             return Map.of();
+        }
+
+        Map<Long, Double> pgVectorScores = retrieveWithPgVector(query, documentId, documentIds);
+        if (!pgVectorScores.isEmpty()) {
+            return pgVectorScores;
         }
 
         initializeEmbeddingsIfNeeded();
@@ -911,6 +1022,25 @@ public class RagService {
                     .collect(Collectors.toMap(
                             match -> match.embedded().getId(),
                             EmbeddingMatch::score,
+                            Math::max,
+                            LinkedHashMap::new
+                    ));
+        } catch (Exception e) {
+            return Map.of();
+        }
+    }
+
+    private Map<Long, Double> retrieveWithPgVector(String query, Long documentId, List<Long> documentIds) {
+        try {
+            EmbeddingModel embeddingModel = createEmbeddingModel();
+            Embedding queryEmbedding = embeddingModel.embed(query).content();
+
+            return pgVectorChunkSearchRepository
+                    .searchSimilar(queryEmbedding.vector(), documentId, documentIds, EMBEDDING_SEARCH_WINDOW)
+                    .stream()
+                    .collect(Collectors.toMap(
+                            PgVectorChunkSearchRepository.VectorChunkMatch::chunkId,
+                            PgVectorChunkSearchRepository.VectorChunkMatch::score,
                             Math::max,
                             LinkedHashMap::new
                     ));
@@ -940,6 +1070,33 @@ public class RagService {
                     .map(chunk -> TextSegment.from(chunk.getChunkText()))
                     .toList();
             List<Embedding> embeddings = embeddingModel.embedAll(segments).content();
+            embeddingStore.addAll(embeddings, chunks);
+            embeddingsInitialized = true;
+        } catch (Exception ignored) {
+            embeddingsInitialized = false;
+        }
+    }
+
+    private void storeChunkEmbeddings(List<DocumentChunk> chunks) {
+        if (chunks.isEmpty() || !embeddingEnabled()) {
+            return;
+        }
+
+        try {
+            EmbeddingModel embeddingModel = createEmbeddingModel();
+            List<TextSegment> segments = chunks.stream()
+                    .map(chunk -> TextSegment.from(chunk.getChunkText()))
+                    .toList();
+            List<Embedding> embeddings = embeddingModel.embedAll(segments).content();
+
+            for (int i = 0; i < chunks.size() && i < embeddings.size(); i++) {
+                try {
+                    pgVectorChunkSearchRepository.updateEmbedding(chunks.get(i).getId(), embeddings.get(i).vector());
+                } catch (Exception ignored) {
+                    // Keep in-memory fallback populated even when pgvector is unavailable.
+                }
+            }
+
             embeddingStore.addAll(embeddings, chunks);
             embeddingsInitialized = true;
         } catch (Exception ignored) {
@@ -981,10 +1138,10 @@ public class RagService {
             List<TextSegment> segments = splitIntoSegments(text);
             List<DocumentChunk> chunks = new ArrayList<>();
             for (int i = 0; i < segments.size(); i++) {
-                chunks.add(new DocumentChunk(ragDocument, i, segments.get(i).text(), "source=" + fileName + ", chunkIndex=" + i));
+                chunks.add(new DocumentChunk(ragDocument, i, segments.get(i).text(), "source=" + fileName + ", chunkIndex=" + i + ", chunkType=TEXT, sourceType=PDF_TEXT"));
             }
             documentChunkRepository.saveAll(chunks);
-            addChunksToEmbeddingStore(chunks);
+            storeChunkEmbeddings(chunks);
             return ragDocument;
         } catch (IOException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
@@ -1595,7 +1752,27 @@ public class RagService {
     }
 
     private String normalizeWhitespace(String text) {
-        return text == null ? "" : text.replaceAll("\\s+", " ").trim();
+        if (text == null) {
+            return "";
+        }
+
+        return text
+                .replace('\u00A0', ' ')
+                .replace("▮", " ")
+                .replace("■", " ")
+                .replace("□", " ")
+                .replace("●", " ")
+                .replace("○", " ")
+                .replace("▶", " ")
+                .replace("◆", " ")
+                .replace("•", " ")
+                .replaceAll("[\\u0000-\\u001F]", " ")
+                .replaceAll("([가-힣])([A-Za-z])", "$1 $2")
+                .replaceAll("([A-Za-z])([가-힣])", "$1 $2")
+                .replaceAll("([가-힣])([0-9])", "$1 $2")
+                .replaceAll("([0-9])([가-힣])", "$1 $2")
+                .replaceAll("\\s+", " ")
+                .trim();
     }
 
     private String abbreviate(String text, int maxLength) {
@@ -1714,11 +1891,14 @@ public class RagService {
         }
 
         String evidenceBlock = conceptEvidence.stream()
-                .limit(8)
-                .map(item -> "- " + item.concept() + ": " + item.explanation())
+                .limit(10)
+                .map(item -> "- " + normalizeWhitespace(item.concept()) + ": " + normalizeWhitespace(item.explanation()))
+                .filter(line -> !isBrokenGeneratedText(line))
                 .collect(Collectors.joining("\n"));
         String sentenceBlock = evidenceSentences.stream()
-                .limit(8)
+                .map(this::normalizeWhitespace)
+                .filter(sentence -> !isBrokenGeneratedText(sentence))
+                .limit(10)
                 .map(sentence -> "- " + sentence)
                 .collect(Collectors.joining("\n"));
         String excludedQuestionBlock = excludedQuestionFingerprints == null || excludedQuestionFingerprints.isEmpty()
@@ -1727,44 +1907,68 @@ public class RagService {
                 .limit(20)
                 .map(question -> "- " + question)
                 .collect(Collectors.joining("\n"));
+        String rawExcerpt = abbreviate(rawText, 2200);
+        String studyNote = buildStudyNoteForQuiz(evidenceBlock, sentenceBlock, rawExcerpt);
 
-        String response = ollamaService.generateJson(
-                """
-                You create Korean study questions from PDF evidence.
-                Return strict JSON only.
-                Each item type must be either multiple_choice, short_answer, or ox.
-                For ox, question must be a declarative true/false statement, not a "what is" or "explain" question.
-                For multiple_choice, the question must clearly ask one concept or relationship.
-                For multiple_choice, include exactly 4 meaningful choices and set correctAnswer to the exact correct choice text.
-                For multiple_choice, every choice must be a complete Korean phrase or sentence, not a truncated fragment.
-                For multiple_choice, do not create choices that start with punctuation or end mid-word.
-                For multiple_choice, distractors may be plausible, but they must not be garbled, duplicated, or incomplete.
-                For short_answer, choices must be an empty array.
-                For short_answer, do not create O/X, true/false, yes/no, or judgment-only questions.
-                For short_answer, the question must not be answerable with only "O", "X", "맞다", "틀리다", "예", or "아니오".
-                For short_answer, the question must require explanation, comparison, reason, relationship, or example-based explanation.
-                For short_answer, avoid questions starting with "다음 설명이 맞으면", "맞는가", "옳은가", "참인가", "O/X".
-                For short_answer, question and modelAnswer must focus on the same conceptTag.
-                For short_answer, modelAnswer and correctAnswer must be complete Korean explanatory sentences.
-                For short_answer, do not copy truncated fragments from evidence.
-                For short_answer, do not create answers ending with "다음과 같음", "주요 역할은", "아래와 같음".
-                For short_answer application questions, include a concrete situation or example and how the concept is used there.
-                If evidence is insufficient for a good application short_answer, create a simpler concept explanation question.
-                If a question asks whether a statement is true or false, its type must be ox, not short_answer.
-                For ox, choices must be exactly ["O","X"] and correctAnswer must be either O or X.
-                For ox, the statement must be a complete Korean declarative sentence with a clear subject and predicate.
-                For ox, do not use sentence fragments, headings, lists, or comma-separated leftovers as the statement.
-                understandingLevel must be one of CONCEPT_UNDERSTANDING, CONCEPT_DISTINCTION, CONCEPT_APPLICATION.
-                If %d is 3 or more, include at least one question for each understandingLevel.
-                conceptTag should be the main concept the question is checking.
+        String systemPrompt = """
+                You are a Korean computer-science exam question writer.
+                Return strict JSON only. Do not use markdown. Do not add any text outside JSON.
+
+                Create high-quality Korean quiz questions from the clean study note first.
+                Use the PDF evidence only as supporting ground truth.
+                Do not copy broken PDF fragments. Rewrite the evidence into natural Korean.
+
+                Global quality rules:
+                - Remove or ignore broken symbols such as ▮, ■, □, ●, ○, bullets, page headers, footers, and layout artifacts.
+                - Do not use garbled text such as "Feature Data W", unfinished headings, page numbers, or copied fragments.
+                - Do not create a question if the source sentence is too broken; use another evidence item instead.
+                - Every question must test one clear computer-science concept.
+                - Use natural Korean spacing and grammar.
+                - Do not invent facts outside the evidence.
+                - Do not repeat or paraphrase the previously generated questions listed in the user message.
+                - Prefer facts and concepts from [Clean Study Note]. Do not turn learning objectives, table-of-contents items, or chapter goals into answers.
+
+                Type rules:
+                - Each item type must be one of multiple_choice, short_answer, or ox.
+                - Preferred mode: %s.
+                - Make exactly %d items.
+                - If the requested count is 3 or more, include CONCEPT_UNDERSTANDING, CONCEPT_DISTINCTION, and CONCEPT_APPLICATION at least once.
+
+                Multiple choice rules:
+                - The question must ask one concept, role, difference, or application.
+                - Include exactly 4 choices.
+                - Each choice must be a short, complete Korean phrase or sentence.
+                - Choices should be similar length, plausible, and not duplicated.
+                - correctAnswer must exactly match one of the choices.
+                - Do not paste long evidence sentences into choices.
+
+                O/X rules:
+                - The question field must be a complete declarative statement, not a question.
+                - choices must be exactly ["O", "X"].
+                - correctAnswer must be either "O" or "X".
+                - The statement must be natural Korean and must not contain broken symbols or copied fragments.
+
+                Short answer rules:
+                - choices must be an empty array.
+                - The question must require explanation, comparison, reason, relationship, or example-based application.
+                - The question, correctAnswer, modelAnswer, explanation, sourceEvidence, and conceptTag must focus on the same exact concept.
+                - conceptTag must be a natural Korean learning concept label, not copied PDF text.
+                  Bad: "vi 명령어 입력모드전환". Good: "vi 입력 모드 전환 명령어".
+                  Bad: "데이터베이스정규화제2정규형". Good: "제2정규형과 부분 함수 종속".
+                - The question must be a natural Korean sentence. Do not paste conceptTag awkwardly at the front.
+                - If the answer explains subcommands, subfunctions, options, or listed items, the question must explicitly ask about those items, not only the broader parent topic.
+                - Do not ask "X가 무엇인지 정의와 핵심 특징" unless the answer actually defines X itself.
+                - modelAnswer and correctAnswer must be complete Korean explanatory sentences.
+                - Do not create O/X or yes/no questions as short_answer.
+
                 JSON shape:
                 {"questions":[{"type":"multiple_choice","question":"...","choices":["..."],"correctAnswer":"...","modelAnswer":"...","explanation":"...","sourceEvidence":"...","difficulty":"easy","conceptTag":"...","understandingLevel":"CONCEPT_DISTINCTION"}]}
-                Make exactly %d items.
-                Preferred mode: %s
-                Do not invent facts outside the evidence.
-                Do not repeat or paraphrase the previously generated questions listed in the user message.
-                """.formatted(count, count, type),
-                """
+                """.formatted(type, count);
+
+        String userPrompt = """
+                [Clean Study Note]
+                %s
+
                 [Concept Evidence]
                 %s
 
@@ -1776,9 +1980,12 @@ public class RagService {
 
                 [Raw Excerpt]
                 %s
-                """.formatted(evidenceBlock, excludedQuestionBlock, sentenceBlock, abbreviate(rawText, 1800))
-                ,
-                Math.max(900, count * 320)
+                """.formatted(studyNote, evidenceBlock, excludedQuestionBlock, sentenceBlock, rawExcerpt);
+
+        String response = ollamaService.generateJson(
+                systemPrompt,
+                userPrompt,
+                Math.max(1200, count * 380)
         );
 
         if (response == null || response.isBlank()) {
@@ -1800,14 +2007,8 @@ public class RagService {
                 question = sanitizeGeneratedQuestion(question, type, conceptEvidence, evidenceSentences);
 
                 if (question != null
-                        && "short_answer".equals(question.getType())
-                        && isOxLikeQuestion(question.getQuestion())) {
-                    continue;
-                }
-
-
-                if (question != null
                         && isValidQuestionType(question.getType(), type)
+                        && isAcceptableQuizQuestion(question)
                         && !isDuplicateQuestion(question, questions, excludedQuestionFingerprints)) {
                     questions.add(question);
                 }
@@ -1823,6 +2024,133 @@ public class RagService {
         } catch (Exception e) {
             return List.of();
         }
+    }
+
+    private String buildStudyNoteForQuiz(String evidenceBlock, String sentenceBlock, String rawExcerpt) {
+        String fallback = buildFallbackStudyNote(evidenceBlock, sentenceBlock, rawExcerpt);
+        if (!ollamaService.isEnabled()) {
+            return fallback;
+        }
+
+        String systemPrompt = """
+                You are a Korean computer-science teaching assistant.
+                Convert noisy PDF extraction text into a clean study note for quiz generation.
+                Return plain Korean study notes only. Do not return JSON. Do not use markdown tables.
+
+                Rules:
+                - Do not copy broken PDF text verbatim.
+                - Fix spacing and grammar naturally.
+                - Remove page numbers, table-of-contents items, learning objectives, chapter goals, headers, footers, and layout artifacts.
+                - Ignore sentences ending with goals such as "알아본다", "학습한다", "이해한다", "살펴본다" unless they contain an actual definition.
+                - Keep only definitions, roles, differences, principles, commands, functions, examples, and cause-effect relationships.
+                - Do not invent facts outside the evidence.
+                - Write 8 to 12 concise bullet lines.
+                - Each bullet should contain one quiz-worthy concept.
+                """;
+
+        String userPrompt = """
+                [Concept Evidence]
+                %s
+
+                [Supporting Sentences]
+                %s
+
+                [Raw PDF Excerpt]
+                %s
+                """.formatted(evidenceBlock, sentenceBlock, rawExcerpt);
+
+        String response = ollamaService.generateJson(systemPrompt, userPrompt, 1400);
+
+        String sanitized = sanitizeStudyNoteForQuiz(response);
+        return sanitized.isBlank() ? fallback : sanitized;
+    }
+
+    private String buildFallbackStudyNote(String evidenceBlock, String sentenceBlock, String rawExcerpt) {
+        String combined = String.join("\n", evidenceBlock, sentenceBlock, rawExcerpt);
+        List<String> notes = splitLines(combined).stream()
+                .map(this::normalizeWhitespace)
+                .filter(line -> !isBadStudyNoteLine(line))
+                .distinct()
+                .limit(12)
+                .toList();
+        if (notes.isEmpty()) {
+            return normalizeWhitespace(abbreviate(rawExcerpt, 1000));
+        }
+        return String.join("\n", notes);
+    }
+
+    private String sanitizeStudyNoteForQuiz(String response) {
+        if (response == null || response.isBlank()) {
+            return "";
+        }
+        String cleaned = response
+                .replaceAll("(?s)^```(?:text|markdown)?\\s*", "")
+                .replaceAll("\\s*```$", "")
+                .trim();
+        List<String> lines = splitLines(cleaned).stream()
+                .map(line -> normalizeWhitespace(line).replaceAll("^[-*•]+\\s*", ""))
+                .filter(line -> !isBadStudyNoteLine(line))
+                .distinct()
+                .limit(14)
+                .toList();
+        return String.join("\n", lines);
+    }
+
+    private boolean isBadStudyNoteLine(String value) {
+        String normalized = normalizeWhitespace(value);
+        String lower = normalized.toLowerCase(Locale.ROOT);
+        if (normalized.isBlank() || normalized.length() < 12) {
+            return true;
+        }
+        if (containsPdfNoise(normalized)) {
+            return true;
+        }
+        if (lower.startsWith("section") || lower.startsWith("chapter") || lower.startsWith("page")) {
+            return true;
+        }
+        if (normalized.startsWith("목차") || normalized.startsWith("차례") || normalized.startsWith("학습 목표") || normalized.startsWith("강의 목표")) {
+            return true;
+        }
+        return normalized.endsWith("알아본다")
+                || normalized.endsWith("알아본다.")
+                || normalized.endsWith("학습한다")
+                || normalized.endsWith("학습한다.")
+                || normalized.endsWith("이해한다")
+                || normalized.endsWith("이해한다.")
+                || normalized.endsWith("살펴본다")
+                || normalized.endsWith("살펴본다.")
+                || normalized.contains("에 대해 알아")
+                || normalized.contains("에 대해 학습")
+                || normalized.contains("에 대해 이해");
+    }
+
+    private boolean isAcceptableQuizQuestion(RagGeneratedQuestionResponse question) {
+        if (question == null) {
+            return false;
+        }
+        if (containsPdfNoise(question.getQuestion())
+                || containsPdfNoise(question.getCorrectAnswer())
+                || containsPdfNoise(question.getModelAnswer())
+                || containsPdfNoise(question.getExplanation())) {
+            return false;
+        }
+        if ("multiple_choice".equals(question.getType()) && question.getChoices() != null) {
+            return question.getChoices().stream().noneMatch(this::containsPdfNoise);
+        }
+        return true;
+    }
+
+    private boolean containsPdfNoise(String value) {
+        String normalized = normalizeWhitespace(value);
+        if (normalized.isBlank()) {
+            return true;
+        }
+        return normalized.contains("▮")
+                || normalized.contains("■")
+                || normalized.contains("□")
+                || normalized.contains("Feature Data W")
+                || normalized.matches(".*[A-Za-z]{2,}\s+[A-Za-z]{1,}\s+[가-힣]{1,}.*")
+                || normalized.length() > 260;
     }
 
     private boolean isOxLikeQuestion(String question) {
@@ -2101,6 +2429,10 @@ public class RagService {
                 .replaceAll("^\"|\"$", "")
                 .trim();
         return stripped.length() < 4
+                || stripped.contains("▮")
+                || stripped.contains("■")
+                || stripped.contains("□")
+                || stripped.contains("Feature Data W")
                 || stripped.matches("^[,.;:，、].*")
                 || startsWithBrokenKoreanFragment(stripped)
                 || endsWithBrokenKoreanFragment(stripped)
@@ -2849,17 +3181,25 @@ public class RagService {
             String conceptTag,
             String understandingLevel
     ) {
-        String concept = resolveShortAnswerConcept(question, sourceEvidence, modelAnswer, conceptTag);
-        String mode = isApplicationQuestion(question) ? "application" : isExampleQuestion(question) ? "example" : "concept";
-        String answer = isValidShortAnswer(question, modelAnswer, concept)
-                ? modelAnswer
-                : buildShortAnswerAnswer(concept, modelAnswer.isBlank() ? sourceEvidence : modelAnswer, mode);
-        String safeQuestion = isValidShortAnswerQuestion(question, concept, mode)
-                ? question
-                : buildShortAnswerQuestionText(concept, mode);
-        String safeExplanation = isValidShortAnswer(explanation, explanation, concept)
-                ? explanation
-                : answer;
+        String rawQuestion = normalizeWhitespace(question);
+        String rawAnswerSource = firstNonBlank(modelAnswer, sourceEvidence, explanation);
+        String concept = resolveShortAnswerConcept(rawQuestion, sourceEvidence, rawAnswerSource, conceptTag);
+        String alignedConcept = resolveAnswerFocusedConcept(concept, rawQuestion, rawAnswerSource);
+        String mode = isApplicationQuestion(rawQuestion) ? "application" : isExampleQuestion(rawQuestion) ? "example" : "concept";
+
+        String answer = isValidAnswerForAlignedShortQuestion(rawQuestion, rawAnswerSource, alignedConcept)
+                ? normalizeWhitespace(rawAnswerSource)
+                : buildShortAnswerAnswer(alignedConcept, rawAnswerSource, mode);
+        String safeQuestion = isQuestionAnswerAligned(rawQuestion, answer, alignedConcept, mode)
+                ? rawQuestion
+                : buildAnswerAlignedShortAnswerQuestion(rawQuestion, alignedConcept, answer, mode);
+        String safeExplanation = isUsefulShortExplanation(explanation, alignedConcept)
+                ? normalizeWhitespace(explanation)
+                : buildShortAnswerExplanation(alignedConcept, safeQuestion, answer);
+        String safeSourceEvidence = sourceEvidence == null || sourceEvidence.isBlank()
+                ? answer
+                : normalizeWhitespace(sourceEvidence);
+
         return new RagGeneratedQuestionResponse(
                 order,
                 "short_answer",
@@ -2868,18 +3208,214 @@ public class RagService {
                 answer,
                 answer,
                 safeExplanation,
-                sourceEvidence.isBlank() ? answer : sourceEvidence,
+                safeSourceEvidence,
                 difficulty.isBlank() ? "medium" : difficulty,
-                concept,
+                alignedConcept,
                 understandingLevel.isBlank() ? ("application".equals(mode) ? "CONCEPT_APPLICATION" : "CONCEPT_UNDERSTANDING") : understandingLevel
         );
     }
 
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return "";
+        }
+        for (String value : values) {
+            String normalized = normalizeWhitespace(value);
+            if (!normalized.isBlank()) {
+                return normalized;
+            }
+        }
+        return "";
+    }
+
+    private String resolveAnswerFocusedConcept(String concept, String question, String answerSource) {
+        List<String> commandTerms = extractCommandTerms(answerSource);
+        List<String> questionCommandTerms = extractCommandTerms(question);
+        if (commandTerms.size() >= 3 && questionCommandTerms.size() < commandTerms.size()) {
+            return formatCommandConcept(commandTerms);
+        }
+
+        String answerConcept = cleanShortAnswerConcept(inferConceptTag(answerSource, answerSource, question));
+        if (isUsableShortAnswerConcept(answerConcept) && !isLikelySameConcept(concept, answerConcept)) {
+            String compactQuestion = normalizeWhitespace(question).replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
+            String compactConcept = normalizeWhitespace(concept).replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
+            if (compactQuestion.contains(compactConcept) && !answerDefinesConcept(answerSource, concept)) {
+                return answerConcept;
+            }
+        }
+        return cleanShortAnswerConcept(concept);
+    }
+
+    private boolean isQuestionAnswerAligned(String question, String answer, String concept, String mode) {
+        String normalizedQuestion = normalizeWhitespace(question);
+        if (!isValidShortAnswerQuestion(normalizedQuestion, concept, mode)) {
+            return false;
+        }
+
+        List<String> answerCommands = extractCommandTerms(answer);
+        if (answerCommands.size() >= 3) {
+            String compactQuestion = normalizedQuestion.replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
+            boolean mentionsCommands = answerCommands.stream()
+                    .allMatch(term -> compactQuestion.contains(term.toLowerCase(Locale.ROOT)));
+            return mentionsCommands && (normalizedQuestion.contains("차이")
+                    || normalizedQuestion.contains("기능")
+                    || normalizedQuestion.contains("역할")
+                    || normalizedQuestion.contains("설명"));
+        }
+
+        if (asksForDefinition(normalizedQuestion)) {
+            return answerDefinesConcept(answer, concept);
+        }
+        return true;
+    }
+
+    private String buildAnswerAlignedShortAnswerQuestion(String originalQuestion, String concept, String answer, String mode) {
+        List<String> commandTerms = extractCommandTerms(answer);
+        if (commandTerms.size() >= 3) {
+            String commandConcept = formatCommandConcept(commandTerms);
+            if (containsViContext(originalQuestion, answer) && !commandConcept.toLowerCase(Locale.ROOT).startsWith("vi ")) {
+                commandConcept = "vi " + commandConcept;
+            }
+            return commandConcept + "의 기능과 차이를 설명하세요.";
+        }
+
+        if ("example".equals(mode)) {
+            return concept + "의 예시를 들고 그 이유를 설명하세요.";
+        }
+        if ("application".equals(mode)) {
+            return concept + " 개념을 실제 예시나 상황에 어떻게 적용할 수 있는지 설명하세요.";
+        }
+        if (answerDefinesConcept(answer, concept)) {
+            return concept + "가 무엇인지 정의와 핵심 특징을 포함해 설명하세요.";
+        }
+        return concept + "에 대해 문서에서 설명한 핵심 역할과 특징을 설명하세요.";
+    }
+
+    private boolean isValidAnswerForAlignedShortQuestion(String question, String answer, String concept) {
+        String normalizedAnswer = normalizeWhitespace(answer);
+        if (normalizedAnswer.length() < 25 || isBrokenGeneratedText(normalizedAnswer)) {
+            return false;
+        }
+        List<String> commandTerms = extractCommandTerms(normalizedAnswer);
+        if (commandTerms.size() >= 3) {
+            return commandTerms.stream().allMatch(term -> normalizedAnswer.contains(term));
+        }
+        return isValidShortAnswer(question, normalizedAnswer, concept);
+    }
+
+    private boolean isUsefulShortExplanation(String explanation, String concept) {
+        String normalized = normalizeWhitespace(explanation);
+        if (normalized.length() < 20 || isBrokenGeneratedText(normalized)) {
+            return false;
+        }
+        if (normalized.equalsIgnoreCase(concept)) {
+            return false;
+        }
+        return true;
+    }
+
+    private String buildShortAnswerExplanation(String concept, String question, String answer) {
+        List<String> commandTerms = extractCommandTerms(answer);
+        if (commandTerms.size() >= 3) {
+            return "이 문제는 " + formatTermList(commandTerms) + " 명령어의 기능 차이를 구분할 수 있는지 확인합니다.";
+        }
+        if (asksForDefinition(question)) {
+            return "이 문제는 " + concept + "의 정의와 핵심 특징을 이해했는지 확인합니다.";
+        }
+        return "이 문제는 " + concept + "에 대한 문서의 핵심 설명을 이해했는지 확인합니다.";
+    }
+
+    private boolean asksForDefinition(String question) {
+        String normalized = normalizeWhitespace(question);
+        return normalized.contains("무엇인지")
+                || normalized.contains("정의")
+                || normalized.contains("개념")
+                || normalized.contains("핵심 특징");
+    }
+
+    private boolean answerDefinesConcept(String answer, String concept) {
+        String normalizedAnswer = normalizeWhitespace(answer);
+        String normalizedConcept = cleanShortAnswerConcept(concept);
+        String compactAnswer = normalizedAnswer.replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
+        String compactConcept = normalizedConcept.replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
+        if (compactConcept.isBlank() || !compactAnswer.contains(compactConcept)) {
+            return false;
+        }
+        int conceptIndex = compactAnswer.indexOf(compactConcept);
+        return conceptIndex >= 0 && conceptIndex <= 25
+                && normalizedAnswer.matches(".*(이다|입니다|의미|말한다|사용되는|수행하는|역할|특징).*\\.?");
+    }
+
+    private boolean isLikelySameConcept(String left, String right) {
+        String compactLeft = normalizeWhitespace(left).replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
+        String compactRight = normalizeWhitespace(right).replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
+        return compactLeft.equals(compactRight)
+                || compactLeft.contains(compactRight)
+                || compactRight.contains(compactLeft);
+    }
+
+    private List<String> extractCommandTerms(String text) {
+        String normalized = normalizeWhitespace(text);
+        Matcher matcher = Pattern.compile("(?<![A-Za-z0-9가-힣])([A-Za-z]{1,4}|[가-힣A-Za-z0-9]{1,12})\\s*명령어").matcher(normalized);
+        List<String> terms = new ArrayList<>();
+        while (matcher.find()) {
+            String term = matcher.group(1).trim();
+            if (!term.isBlank() && terms.stream().noneMatch(existing -> existing.equals(term))) {
+                terms.add(term);
+            }
+        }
+        if (terms.size() >= 4 && terms.stream().anyMatch(term -> term.equalsIgnoreCase("vi"))) {
+            terms = terms.stream()
+                    .filter(term -> !term.equalsIgnoreCase("vi"))
+                    .toList();
+        }
+        return terms;
+    }
+
+    private String formatCommandConcept(List<String> commandTerms) {
+        List<String> terms = commandTerms == null ? List.of() : commandTerms.stream()
+                .filter(term -> term != null && !term.isBlank())
+                .distinct()
+                .toList();
+        if (isInputModeCommandSet(terms)) {
+            return "입력 모드 전환 명령어";
+        }
+        return formatTermList(terms) + " 명령어";
+    }
+
+    private boolean isInputModeCommandSet(List<String> terms) {
+        if (terms == null || terms.size() < 3) {
+            return false;
+        }
+        Set<String> normalizedTerms = terms.stream()
+                .map(term -> term == null ? "" : term.trim().toLowerCase(Locale.ROOT))
+                .collect(Collectors.toSet());
+        return normalizedTerms.contains("i")
+                && normalizedTerms.contains("a")
+                && normalizedTerms.contains("o");
+    }
+
+    private String formatTermList(List<String> terms) {
+        return terms.stream()
+                .filter(term -> term != null && !term.isBlank())
+                .distinct()
+                .collect(Collectors.joining(", "));
+    }
+
+    private boolean containsViContext(String question, String answer) {
+        String combined = normalizeWhitespace(question + " " + answer).toLowerCase(Locale.ROOT);
+        return combined.contains("vi") || combined.contains("vim");
+    }
+
     private String buildShortAnswerQuestionText(String concept, String mode) {
+        String naturalConcept = naturalizeConceptLabel(concept);
+        if (naturalConcept.contains("명령어")) {
+            return naturalConcept + "의 기능과 차이를 설명하세요.";
+        }
         return switch (mode) {
-            case "example" -> concept + "의 예시를 들고 그 이유를 설명하세요.";
-            case "application" -> concept + " 개념을 실제 예시나 상황에 어떻게 적용할 수 있는지 설명하세요.";
-            default -> concept + "가 무엇인지 정의와 핵심 특징을 포함해 설명하세요.";
+            case "example" -> naturalConcept + "의 예시를 들고 그 이유를 설명하세요.";
+            case "application" -> naturalConcept + " 개념을 실제 예시나 상황에 어떻게 적용할 수 있는지 설명하세요.";
+            default -> naturalConcept + "의 정의와 핵심 특징을 설명하세요.";
         };
     }
 
@@ -2895,6 +3431,7 @@ public class RagService {
     }
 
     private String buildShortAnswerAnswer(String concept, String rawExplanation, String mode) {
+        concept = naturalizeConceptLabel(concept);
         String explanation = normalizeShortAnswerEvidence(concept, rawExplanation);
         String particle = subjectParticle(concept);
         if ("application".equals(mode)) {
@@ -2986,11 +3523,65 @@ public class RagService {
     }
 
     private String cleanShortAnswerConcept(String concept) {
-        String cleaned = normalizeWhitespace(concept).replaceAll("[\\p{Punct}]", " ").replaceAll("\\s+", " ").trim();
+        String cleaned = normalizeWhitespace(concept)
+                .replaceAll("[\\p{Punct}]", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
         if (!cleaned.contains(" ")) {
             cleaned = normalizeSearchToken(cleaned);
         }
+        cleaned = naturalizeConceptLabel(cleaned);
         return cleaned.isBlank() ? "핵심 개념" : cleaned;
+    }
+
+    private String naturalizeConceptLabel(String concept) {
+        String label = normalizeWhitespace(concept)
+                .replaceAll("개념의\\s*핵심.*$", "")
+                .replaceAll("정의와\\s*핵심\\s*특징.*$", "")
+                .replaceAll("무엇인지.*$", "")
+                .replaceAll("\\s+", " ")
+                .trim();
+        if (label.isBlank()) {
+            return "핵심 개념";
+        }
+
+        label = splitKoreanCompoundTerms(label);
+        label = label.replaceAll("\\s+", " ").trim();
+
+        String compact = label.replaceAll("\\s+", "");
+        String lower = label.toLowerCase(Locale.ROOT);
+        if (compact.matches("(?i).*vi.*명령어.*입력.*모드.*전환.*")
+                || compact.matches("(?i).*vi.*입력.*모드.*전환.*명령어.*")) {
+            return "vi 입력 모드 전환 명령어";
+        }
+        if (compact.matches(".*입력.*모드.*전환.*명령어.*")
+                || compact.matches(".*명령어.*입력.*모드.*전환.*")) {
+            return lower.contains("vi") ? "vi 입력 모드 전환 명령어" : "입력 모드 전환 명령어";
+        }
+
+        return label;
+    }
+
+    private String splitKoreanCompoundTerms(String value) {
+        String result = normalizeWhitespace(value);
+        List<String> terms = List.of(
+                "입력", "출력", "모드", "전환", "명령어", "편집기", "커서", "위치", "새", "줄",
+                "프로세스", "스레드", "스케줄링", "메모리", "가상", "페이지", "페이징", "파일", "시스템",
+                "데이터베이스", "정규화", "트랜잭션", "인덱스", "기본키", "외래키", "조인",
+                "알고리즘", "정렬", "탐색", "그래프", "재귀", "복잡도",
+                "함수", "클래스", "객체", "상속", "인터페이스", "예외", "처리",
+                "네트워크", "프로토콜", "라우팅", "소켓", "패킷"
+        );
+
+        for (String term : terms) {
+            result = result.replaceAll("(?<!\\s)" + Pattern.quote(term), " " + term);
+            result = result.replaceAll(Pattern.quote(term) + "(?!\\s)", term + " ");
+        }
+
+        result = result.replaceAll("(?i)\\bvi\\s+명령어\\s+", "vi ");
+        result = result.replaceAll("(?i)\\bvim\\s+명령어\\s+", "vim ");
+        result = result.replaceAll("\\s+", " ").trim();
+        return result;
     }
 
     private boolean isUsableShortAnswerConcept(String concept) {
@@ -3083,18 +3674,20 @@ public class RagService {
     }
 
     private RagGeneratedQuestionResponse buildOxQuestion(int order, ConceptEvidence evidence, List<ConceptEvidence> pool) {
+        String naturalEvidenceConcept = cleanShortAnswerConcept(evidence.concept());
+        final ConceptEvidence naturalEvidence = new ConceptEvidence(naturalEvidenceConcept, evidence.explanation());
         ConceptEvidence distractor = pool.stream()
-                .filter(candidate -> !candidate.concept().equals(evidence.concept()))
+                .filter(candidate -> !candidate.concept().equals(naturalEvidence.concept()))
                 .findFirst()
                 .orElse(null);
         boolean buildFalseStatement = distractor != null && order % 2 == 0;
         String statement = buildFalseStatement
-                ? completeEvidenceDescription(evidence.concept(), distractor.explanation())
-                : completeEvidenceDescription(evidence.concept(), evidence.explanation());
+                ? completeEvidenceDescription(naturalEvidence.concept(), distractor.explanation())
+                : completeEvidenceDescription(naturalEvidence.concept(), naturalEvidence.explanation());
         String correctAnswer = buildFalseStatement ? "X" : "O";
         String explanation = buildFalseStatement
-                ? "문서 근거에서 " + evidence.concept() + " 개념은 다음과 같이 설명됩니다: " + completeEvidenceDescription(evidence.concept(), evidence.explanation())
-                : "문서에서 " + evidence.concept() + "에 대한 설명과 일치하므로 O가 정답입니다.";
+                ? "문서 근거에서 " + naturalEvidence.concept() + " 개념은 다음과 같이 설명됩니다: " + completeEvidenceDescription(naturalEvidence.concept(), naturalEvidence.explanation())
+                : "문서에서 " + naturalEvidence.concept() + "에 대한 설명과 일치하므로 O가 정답입니다.";
 
         return new RagGeneratedQuestionResponse(
                 order,
@@ -3102,11 +3695,11 @@ public class RagService {
                 "다음 설명이 맞으면 O, 틀리면 X를 고르세요.\n\"" + statement + "\"",
                 List.of("O", "X"),
                 correctAnswer,
-                completeEvidenceDescription(evidence.concept(), evidence.explanation()),
+                completeEvidenceDescription(naturalEvidence.concept(), naturalEvidence.explanation()),
                 explanation,
-                completeEvidenceDescription(evidence.concept(), evidence.explanation()),
+                completeEvidenceDescription(naturalEvidence.concept(), naturalEvidence.explanation()),
                 "easy",
-                evidence.concept(),
+                naturalEvidence.concept(),
                 "CONCEPT_UNDERSTANDING"
         );
     }
@@ -3124,7 +3717,8 @@ public class RagService {
             distractors.add(buildFallbackDistractor(target, distractors.size()));
         }
 
-        String correctChoice = completeEvidenceDescription(target.concept(), target.explanation());
+        String naturalTargetConcept = cleanShortAnswerConcept(target.concept());
+        String correctChoice = completeEvidenceDescription(naturalTargetConcept, target.explanation());
         List<String> choices = new ArrayList<>();
         choices.add(correctChoice);
         choices.addAll(distractors.subList(0, 3));
@@ -3133,14 +3727,14 @@ public class RagService {
         return new RagGeneratedQuestionResponse(
                 order,
                 "multiple_choice",
-                target.concept() + "에 대한 설명으로 가장 알맞은 것은 무엇인가요?",
+                naturalTargetConcept + "에 대한 설명으로 가장 알맞은 것은 무엇인가요?",
                 choices,
                 correctChoice,
                 correctChoice,
-                "정답은 문서에서 " + target.concept() + " 개념을 직접 설명한 문장입니다.",
+                "정답은 문서에서 " + naturalTargetConcept + " 개념을 직접 설명한 문장입니다.",
                 correctChoice,
                 "medium",
-                target.concept(),
+                naturalTargetConcept,
                 "CONCEPT_DISTINCTION"
         );
     }
@@ -3240,6 +3834,34 @@ public class RagService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "type must be one of mixed, multiple_choice, short_answer, ox");
         }
         return normalized;
+    }
+
+    private String formatChunkSource(DocumentChunk chunk) {
+        Map<String, String> metadata = parseChunkMetadata(chunk.getMetadata());
+        String chunkType = metadata.getOrDefault("chunkType", "TEXT");
+        String sourceType = metadata.getOrDefault("sourceType", "PDF_TEXT");
+        String pageNumber = metadata.get("pageNumber");
+        String pageSuffix = pageNumber == null || pageNumber.isBlank() ? "" : ", page " + pageNumber;
+        return chunk.getDocument().getTitle()
+                + " [chunk " + chunk.getChunkIndex()
+                + ", " + chunkType
+                + ", " + sourceType
+                + pageSuffix
+                + "]";
+    }
+
+    private Map<String, String> parseChunkMetadata(String metadata) {
+        if (metadata == null || metadata.isBlank()) {
+            return Map.of();
+        }
+        Map<String, String> values = new LinkedHashMap<>();
+        for (String part : metadata.split(",")) {
+            String[] keyValue = part.trim().split("=", 2);
+            if (keyValue.length == 2 && !keyValue[0].isBlank()) {
+                values.put(keyValue[0].trim(), keyValue[1].trim());
+            }
+        }
+        return values;
     }
 
     private int normalizeCount(Integer count) {
