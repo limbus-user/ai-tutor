@@ -22,6 +22,8 @@ const state = {
   homeQuizCount: 0,
   homeMessageCount: 0,
   homeRecentMessages: [],
+  newStudyAnalysis: null,
+  newStudyAnalysisOpen: false,
 };
 
 const views = {
@@ -416,6 +418,362 @@ function renderQuizDocumentSelection() {
   element.appendChild(chips);
 }
 
+function buildUploadAnalysis(uploadResponse) {
+  return {
+    documentName: uploadResponse.title || "-",
+    chunkCount: uploadResponse.chunkCount ?? 0,
+    inferredSubject: uploadResponse.inferredSubject || "-",
+    inferredUnit: uploadResponse.inferredUnit || "-",
+    recommendedTags: Array.isArray(uploadResponse.recommendedTags) ? uploadResponse.recommendedTags : [],
+    documentDifficulty: uploadResponse.documentDifficulty || "-",
+    confidence: uploadResponse.confidence || "-",
+  };
+}
+
+function renderUploadAnalysisCard(documentInfo) {
+  const analysis = documentInfo.uploadAnalysis;
+  if (!analysis) return null;
+
+  const card = document.createElement("div");
+  card.className = "upload-analysis-card";
+
+  const header = document.createElement("div");
+  header.className = "upload-analysis-card-header";
+  header.innerHTML = "<strong>문서 분석 결과</strong>";
+  const headerActions = document.createElement("div");
+  headerActions.className = "upload-analysis-header-actions";
+  const applyButton = document.createElement("button");
+  applyButton.type = "button";
+  applyButton.textContent = "입력값 반영";
+  applyButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    applyUploadAnalysisToInputs(analysis, documentInfo.analysisInputScope || "workspace");
+  });
+  const status = document.createElement("span");
+  status.textContent = documentInfo.analysisStatus || "업로드 완료";
+  const closeButton = document.createElement("button");
+  closeButton.type = "button";
+  closeButton.className = "upload-analysis-close-button";
+  closeButton.textContent = "닫기";
+  closeButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    closeUploadAnalysis(documentInfo.analysisInputScope || "workspace");
+  });
+  headerActions.append(applyButton, status, closeButton);
+  header.appendChild(headerActions);
+  card.appendChild(header);
+
+  const grid = document.createElement("div");
+  grid.className = "upload-analysis-grid";
+  [
+    ["문서명", analysis.documentName || documentInfo.title || "-"],
+    ["chunk 수", `${analysis.chunkCount ?? 0}개`],
+    ["추정 과목", analysis.inferredSubject || "-"],
+    ["추정 단원", analysis.inferredUnit || "-"],
+    ["문서 난이도", analysis.documentDifficulty || "-"],
+    ["신뢰도", analysis.confidence || "-"],
+  ].forEach(([label, value]) => {
+    const item = document.createElement("div");
+    item.className = "upload-analysis-item";
+    const labelElement = document.createElement("span");
+    labelElement.textContent = label;
+    const valueElement = document.createElement("strong");
+    valueElement.textContent = value;
+    item.append(labelElement, valueElement);
+    grid.appendChild(item);
+  });
+  card.appendChild(grid);
+
+  const tags = document.createElement("div");
+  tags.className = "upload-analysis-tags";
+  const tagValues = analysis.recommendedTags?.length ? analysis.recommendedTags : ["추천 태그 없음"];
+  tagValues.forEach((value) => {
+    const tagChip = document.createElement("span");
+    tagChip.className = "upload-analysis-tag-chip";
+
+    const editButton = document.createElement("button");
+    editButton.type = "button";
+    editButton.className = "upload-analysis-tag-edit";
+    editButton.textContent = value;
+    editButton.title = "클릭하면 태그를 수정합니다.";
+    editButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      editUploadAnalysisTag(documentInfo.documentId, value);
+    });
+
+    tagChip.appendChild(editButton);
+    if (value !== "추천 태그 없음") {
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = "upload-analysis-tag-delete";
+      deleteButton.textContent = "×";
+      deleteButton.setAttribute("aria-label", `${value} 태그 삭제`);
+      deleteButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        removeUploadAnalysisTag(documentInfo.documentId, value);
+      });
+      tagChip.appendChild(deleteButton);
+    }
+    tags.appendChild(tagChip);
+  });
+  card.appendChild(tags);
+
+  const editor = document.createElement("form");
+  editor.className = "upload-analysis-tag-editor";
+  editor.innerHTML = `
+    <input type="text" aria-label="추천 태그 추가" placeholder="태그 추가 또는 수정">
+    <button type="submit">추가</button>
+  `;
+  editor.addEventListener("submit", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const input = editor.querySelector("input");
+    addUploadAnalysisTag(documentInfo.documentId, input.value);
+    input.value = "";
+  });
+  card.appendChild(editor);
+
+  return card;
+}
+
+function closeUploadAnalysis(scope = "workspace") {
+  if (scope === "new-study") {
+    state.newStudyAnalysisOpen = false;
+    renderNewStudyAnalysis();
+    return;
+  }
+
+  if (!state.currentWorkspace) return;
+  state.currentWorkspace.activeAnalysisDocumentId = null;
+  renderLatestUploadAnalysis();
+}
+
+function applyUploadAnalysisToInputs(analysis, scope = "workspace") {
+  const inputPrefix = scope === "new-study" ? "new-study" : "workspace";
+  const subjectInput = document.getElementById(`${inputPrefix}-subject`);
+  const unitInput = document.getElementById(`${inputPrefix}-unit`);
+  const trustInput = document.getElementById(`${inputPrefix}-trust`);
+  if (subjectInput && analysis.inferredSubject && analysis.inferredSubject !== "분류 필요") {
+    subjectInput.value = analysis.inferredSubject;
+  }
+  if (unitInput && analysis.inferredUnit && analysis.inferredUnit !== "-") {
+    unitInput.value = analysis.inferredUnit;
+  }
+  if (trustInput && analysis.confidence && analysis.confidence !== "-") {
+    trustInput.value = analysis.confidence;
+  }
+}
+
+function renderNewStudyAnalysis() {
+  const panel = document.getElementById("new-study-analysis-panel");
+  const button = document.getElementById("new-study-analysis-button");
+  if (!panel) return;
+
+  panel.innerHTML = "";
+  if (!state.newStudyAnalysis || !state.newStudyAnalysisOpen) {
+    panel.classList.add("hidden");
+    if (button) button.textContent = state.newStudyAnalysis ? "분석 결과" : "PDF 분석";
+    return;
+  }
+
+  const card = renderUploadAnalysisCard(state.newStudyAnalysis);
+  if (!card) {
+    panel.classList.add("hidden");
+    if (button) button.textContent = "PDF 분석";
+    return;
+  }
+
+  panel.classList.remove("hidden");
+  panel.appendChild(card);
+  if (button) button.textContent = "분석 닫기";
+}
+
+function resetNewStudyAnalysis() {
+  state.newStudyAnalysis = null;
+  state.newStudyAnalysisOpen = false;
+  renderNewStudyAnalysis();
+}
+
+async function analyzeNewStudyPdf() {
+  const button = document.getElementById("new-study-analysis-button");
+  const fileInput = document.getElementById("new-study-file");
+  if (!fileInput?.files?.[0]) {
+    alert("분석할 PDF 파일을 먼저 선택해 주세요.");
+    return;
+  }
+
+  const analysisForm = new FormData();
+  analysisForm.append("file", fileInput.files[0]);
+  analysisForm.append("subject", document.getElementById("new-study-subject").value);
+  analysisForm.append("unitName", document.getElementById("new-study-unit").value);
+  analysisForm.append("trustLevel", document.getElementById("new-study-trust").value);
+
+  if (button) {
+    button.disabled = true;
+    button.textContent = "분석 중";
+  }
+
+  try {
+    const response = await apiFetch("/api/rag/analyze-preview", {
+      method: "POST",
+      body: analysisForm,
+    });
+    state.newStudyAnalysis = {
+      documentId: "new-study-preview",
+      title: response.title || fileInput.files[0].name,
+      uploadAnalysis: buildUploadAnalysis(response),
+      analysisInputScope: "new-study",
+      analysisStatus: "미리보기",
+    };
+    state.newStudyAnalysisOpen = true;
+    renderNewStudyAnalysis();
+  } catch (error) {
+    alert(formatErrorMessage(error, "PDF 분석을 완료하지 못했습니다."));
+    renderNewStudyAnalysis();
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function renderLatestUploadAnalysis() {
+  const panel = document.getElementById("upload-analysis-panel");
+  if (!panel) return;
+
+  const documents = state.currentWorkspace?.documents || [];
+  const activeId = state.currentWorkspace?.activeAnalysisDocumentId;
+  const documentInfo = documents.find((document) => document.documentId === activeId && document.uploadAnalysis);
+
+  panel.innerHTML = "";
+  if (!documentInfo) {
+    panel.classList.add("hidden");
+    updateAnalysisToggleButton();
+    return;
+  }
+
+  const card = renderUploadAnalysisCard(documentInfo);
+  if (!card) {
+    panel.classList.add("hidden");
+    updateAnalysisToggleButton();
+    return;
+  }
+
+  panel.classList.remove("hidden");
+  panel.appendChild(card);
+  updateAnalysisToggleButton();
+}
+
+function updateAnalysisToggleButton() {
+  const button = document.getElementById("toggle-upload-analysis-button");
+  if (!button) return;
+
+  const documents = state.currentWorkspace?.documents || [];
+  const latestId = state.currentWorkspace?.latestUploadAnalysisDocumentId;
+  const hasAnalysisTarget = documents.some((documentInfo) =>
+    documentInfo.documentId === latestId || documentInfo.uploadAnalysis,
+  );
+
+  button.classList.toggle("hidden", !hasAnalysisTarget);
+  button.textContent = state.currentWorkspace?.activeAnalysisDocumentId ? "분석 닫기" : "분석 결과";
+}
+
+async function showDocumentAnalysis(documentId) {
+  if (!state.currentWorkspace) return;
+
+  if (state.currentWorkspace.activeAnalysisDocumentId === documentId) {
+    closeUploadAnalysis("workspace");
+    return;
+  }
+
+  const existing = state.currentWorkspace.documents.find((documentInfo) => documentInfo.documentId === documentId);
+  if (!existing) return;
+
+  if (!existing.uploadAnalysis) {
+    const response = await apiFetch(`/api/rag/documents/${documentId}/analysis`);
+    state.currentWorkspace.documents = state.currentWorkspace.documents.map((documentInfo) =>
+      documentInfo.documentId === documentId
+        ? { ...documentInfo, uploadAnalysis: buildUploadAnalysis(response) }
+        : documentInfo,
+    );
+  }
+
+  state.currentWorkspace.activeAnalysisDocumentId = documentId;
+  state.currentWorkspace.latestUploadAnalysisDocumentId = documentId;
+  renderLatestUploadAnalysis();
+  document.getElementById("upload-analysis-panel")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function updateUploadAnalysisTags(documentId, updater) {
+  if (state.newStudyAnalysis?.documentId === documentId && state.newStudyAnalysis.uploadAnalysis) {
+    const currentTags = Array.isArray(state.newStudyAnalysis.uploadAnalysis.recommendedTags)
+      ? state.newStudyAnalysis.uploadAnalysis.recommendedTags
+      : [];
+    state.newStudyAnalysis = {
+      ...state.newStudyAnalysis,
+      uploadAnalysis: {
+        ...state.newStudyAnalysis.uploadAnalysis,
+        recommendedTags: updater(currentTags),
+      },
+    };
+    renderNewStudyAnalysis();
+    return;
+  }
+
+  if (!state.currentWorkspace?.documents) return;
+  state.currentWorkspace.documents = state.currentWorkspace.documents.map((documentInfo) => {
+    if (documentInfo.documentId !== documentId || !documentInfo.uploadAnalysis) {
+      return documentInfo;
+    }
+
+    const currentTags = Array.isArray(documentInfo.uploadAnalysis.recommendedTags)
+      ? documentInfo.uploadAnalysis.recommendedTags
+      : [];
+    return {
+      ...documentInfo,
+      uploadAnalysis: {
+        ...documentInfo.uploadAnalysis,
+        recommendedTags: updater(currentTags),
+      },
+    };
+  });
+  renderDocuments();
+  renderLatestUploadAnalysis();
+}
+
+function normalizeUploadTag(value) {
+  return String(value || "").trim().replace(/\s+/g, " ");
+}
+
+function addUploadAnalysisTag(documentId, value) {
+  const tag = normalizeUploadTag(value);
+  if (!tag) return;
+
+  updateUploadAnalysisTags(documentId, (tags) => [...new Set([...tags, tag])]);
+}
+
+function removeUploadAnalysisTag(documentId, value) {
+  const tag = normalizeUploadTag(value);
+  if (!tag) return;
+
+  updateUploadAnalysisTags(documentId, (tags) => tags.filter((currentTag) => currentTag !== tag));
+}
+
+function editUploadAnalysisTag(documentId, currentValue) {
+  const normalizedCurrent = normalizeUploadTag(currentValue);
+  if (!normalizedCurrent || normalizedCurrent === "추천 태그 없음") return;
+
+  const nextValue = window.prompt("추천 태그를 수정하세요. 비워두면 삭제됩니다.", normalizedCurrent);
+  if (nextValue === null) return;
+
+  const normalizedNext = normalizeUploadTag(nextValue);
+  updateUploadAnalysisTags(documentId, (tags) => {
+    const nextTags = tags.filter((tag) => tag !== normalizedCurrent);
+    if (normalizedNext) {
+      nextTags.push(normalizedNext);
+    }
+    return [...new Set(nextTags)];
+  });
+}
+
 function renderDocuments() {
   const container = document.getElementById("document-list");
   container.innerHTML = "";
@@ -425,6 +783,7 @@ function renderDocuments() {
   if (!documents.length) {
     container.innerHTML = '<div class="empty-box">업로드된 PDF가 없습니다.</div>';
     renderWorkspaceHeader();
+    renderLatestUploadAnalysis();
     renderQuizDocumentSelection();
     return;
   }
@@ -439,6 +798,16 @@ function renderDocuments() {
     const renameButton = fragment.querySelector(".rename-document-button");
     const deleteButton = fragment.querySelector(".delete-document-button");
     const selectedIndicator = fragment.querySelector(".document-selected-indicator");
+    const trailing = fragment.querySelector(".document-row-trailing");
+    const analysisButton = document.createElement("button");
+    analysisButton.type = "button";
+    analysisButton.className = "document-analysis-button";
+    analysisButton.textContent = "분석";
+    analysisButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void showDocumentAnalysis(documentInfo.documentId);
+    });
+    trailing.insertBefore(analysisButton, moreButton);
 
     const selectedForQuiz = getSelectedQuizDocumentIds().includes(documentInfo.documentId);
     card.classList.toggle("selected", selectedForQuiz);
@@ -457,7 +826,6 @@ function renderDocuments() {
     fragment.querySelector(".document-uploaded-at").textContent = documentInfo.createdAt
       ? `업로드 ${new Date(documentInfo.createdAt).toLocaleString("ko-KR", { dateStyle: "short", timeStyle: "short" })}`
       : "";
-
     openButton.addEventListener("click", () => {
       const selectedIds = getSelectedQuizDocumentIds();
       state.currentWorkspace.selectedQuizDocumentIds = selectedIds.includes(documentInfo.documentId)
@@ -497,6 +865,7 @@ function renderDocuments() {
   });
 
   renderWorkspaceHeader();
+  renderLatestUploadAnalysis();
   renderQuizDocumentSelection();
 }
 
@@ -523,6 +892,7 @@ async function renameDocument(documentInfo) {
             subject: renamed.subject,
             unitName: renamed.unitName,
             trustLevel: renamed.trustLevel,
+            uploadAnalysis: document.uploadAnalysis,
           }
         : document,
     );
@@ -1839,6 +2209,8 @@ async function openExistingSession(sessionId) {
       quizzes,
       currentDocumentId,
       selectedQuizDocumentIds: documents.map((document) => document.documentId),
+      latestUploadAnalysisDocumentId: null,
+      activeAnalysisDocumentId: null,
     };
 
     renderWorkspaceHeader();
@@ -1936,10 +2308,13 @@ async function createNewStudy(event) {
         unitName: document.getElementById("new-study-unit").value,
         trustLevel: document.getElementById("new-study-trust").value,
         createdAt: state.documentsCatalog.find((documentInfo) => documentInfo.id === uploadResponse.documentId)?.createdAt,
+        uploadAnalysis: buildUploadAnalysis(uploadResponse),
       }],
       quizzes: [],
       currentDocumentId: uploadResponse.documentId,
       selectedQuizDocumentIds: [uploadResponse.documentId],
+      latestUploadAnalysisDocumentId: uploadResponse.documentId,
+      activeAnalysisDocumentId: null,
     };
 
     await fetchSessions();
@@ -1948,6 +2323,7 @@ async function createNewStudy(event) {
     renderMessages();
     renderQuizSets();
     form.reset();
+    resetNewStudyAnalysis();
     showView("workspace");
   } catch (error) {
     alert(formatErrorMessage(error, "새 학습 세션을 만들지 못했습니다."));
@@ -1985,11 +2361,14 @@ async function uploadWorkspacePdf(event) {
       unitName: document.getElementById("workspace-unit").value,
       trustLevel: document.getElementById("workspace-trust").value,
       createdAt: new Date().toISOString(),
+      uploadAnalysis: buildUploadAnalysis(uploadResponse),
     });
 
     state.currentWorkspace.selectedQuizDocumentIds = [
       ...new Set([...getSelectedQuizDocumentIds(), uploadResponse.documentId]),
     ];
+    state.currentWorkspace.latestUploadAnalysisDocumentId = uploadResponse.documentId;
+    state.currentWorkspace.activeAnalysisDocumentId = null;
 
     await fetchDocumentsCatalog();
     renderDocuments();
@@ -2349,8 +2728,32 @@ document.getElementById("refresh-sessions-button").addEventListener("click", asy
   await fetchSessions();
   await fetchHomeActivityMetrics();
 });
+document.getElementById("new-study-analysis-button")?.addEventListener("click", () => {
+  if (!state.newStudyAnalysis) {
+    void analyzeNewStudyPdf();
+    return;
+  }
+  state.newStudyAnalysisOpen = !state.newStudyAnalysisOpen;
+  renderNewStudyAnalysis();
+});
+document.getElementById("new-study-file")?.addEventListener("change", resetNewStudyAnalysis);
 document.getElementById("new-study-form").addEventListener("submit", (event) => void createNewStudy(event));
 document.getElementById("workspace-upload-form").addEventListener("submit", (event) => void uploadWorkspacePdf(event));
+document.getElementById("toggle-upload-analysis-button")?.addEventListener("click", () => {
+  if (!state.currentWorkspace) return;
+  if (state.currentWorkspace.activeAnalysisDocumentId) {
+    state.currentWorkspace.activeAnalysisDocumentId = null;
+    renderLatestUploadAnalysis();
+    return;
+  }
+
+  const latestId = state.currentWorkspace.latestUploadAnalysisDocumentId
+    || state.currentWorkspace.documents?.find((documentInfo) => documentInfo.uploadAnalysis)?.documentId
+    || state.currentWorkspace.documents?.[0]?.documentId;
+  if (latestId) {
+    void showDocumentAnalysis(latestId);
+  }
+});
 document.getElementById("chat-form").addEventListener("submit", (event) => void sendChat(event));
 document.getElementById("chat-attach-button").addEventListener("click", () => {
   alert("곧 추가될 기능입니다.");

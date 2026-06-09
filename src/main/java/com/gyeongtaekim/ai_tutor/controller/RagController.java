@@ -42,6 +42,11 @@ public class RagController {
                 .body(resource);
     }
 
+    @GetMapping("/documents/{documentId}/analysis")
+    public ResponseEntity<RagDocumentUploadResponse> analyzeDocument(@PathVariable Long documentId) {
+        return ResponseEntity.ok(ragService.analyzeDocument(documentId));
+    }
+
     @PatchMapping("/documents/{documentId}")
     public ResponseEntity<RagDocumentSummaryResponse> renameDocument(
             @PathVariable Long documentId,
@@ -64,6 +69,16 @@ public class RagController {
             @RequestParam(value = "trustLevel", required = false) String trustLevel
     ) throws Exception {
         return ResponseEntity.ok(ragService.processPdf(file, subject, unitName, trustLevel));
+    }
+
+    @PostMapping("/analyze-preview")
+    public ResponseEntity<RagDocumentUploadResponse> analyzePdfPreview(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "subject", required = false) String subject,
+            @RequestParam(value = "unitName", required = false) String unitName,
+            @RequestParam(value = "trustLevel", required = false) String trustLevel
+    ) throws Exception {
+        return ResponseEntity.ok(ragService.analyzePdfPreview(file, subject, unitName, trustLevel));
     }
 
     @PostMapping("/query")

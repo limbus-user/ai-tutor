@@ -131,11 +131,80 @@ public class RagService {
         documentChunkRepository.saveAll(chunks);
         addChunksToEmbeddingStore(chunks);
 
-        return new RagDocumentUploadResponse(ragDocument, chunks.size());
+        DocumentUploadAnalysis analysis = analyzeUploadedDocument(ragDocument, chunks, text);
+        return new RagDocumentUploadResponse(
+                ragDocument,
+                chunks.size(),
+                analysis.inferredSubject(),
+                analysis.inferredUnit(),
+                analysis.recommendedTags(),
+                analysis.documentDifficulty(),
+                analysis.confidence()
+        );
+    }
+
+    public RagDocumentUploadResponse analyzePdfPreview(
+            MultipartFile file,
+            String subject,
+            String unitName,
+            String trustLevel
+    ) throws IOException {
+        if (file.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "File is empty");
+        }
+
+        String text = extractTextFromBytes(file.getBytes());
+        List<TextSegment> segments = splitIntoSegments(text);
+        String originalFileName = defaultValue(file.getOriginalFilename(), "preview.pdf");
+        RagDocument previewDocument = new RagDocument(
+                originalFileName,
+                RagDocument.SourceType.PDF,
+                defaultValue(trustLevel, "internal"),
+                defaultValue(subject, "general"),
+                defaultValue(unitName, "general"),
+                originalFileName,
+                text
+        );
+
+        List<DocumentChunk> chunks = new ArrayList<>();
+        for (int i = 0; i < segments.size(); i++) {
+            chunks.add(new DocumentChunk(
+                    previewDocument,
+                    i,
+                    segments.get(i).text(),
+                    "source=" + originalFileName + ", chunkIndex=" + i + ", preview=true"
+            ));
+        }
+
+        DocumentUploadAnalysis analysis = analyzeUploadedDocument(previewDocument, chunks, text);
+        return new RagDocumentUploadResponse(
+                previewDocument,
+                chunks.size(),
+                analysis.inferredSubject(),
+                analysis.inferredUnit(),
+                analysis.recommendedTags(),
+                analysis.documentDifficulty(),
+                analysis.confidence()
+        );
     }
 
     public RagQueryResponse query(String query) {
         return query(query, null);
+    }
+
+    public RagDocumentUploadResponse analyzeDocument(Long documentId) {
+        RagDocument document = getDocument(documentId);
+        List<DocumentChunk> chunks = documentChunkRepository.findByDocumentIdOrderByChunkIndexAsc(documentId);
+        DocumentUploadAnalysis analysis = analyzeUploadedDocument(document, chunks, document.getExtractedText());
+        return new RagDocumentUploadResponse(
+                document,
+                chunks.size(),
+                analysis.inferredSubject(),
+                analysis.inferredUnit(),
+                analysis.recommendedTags(),
+                analysis.documentDifficulty(),
+                analysis.confidence()
+        );
     }
 
     public RagQueryResponse query(String query, Long documentId) {
@@ -928,6 +997,411 @@ public class RagService {
         return splitter.split(document);
     }
 
+    private DocumentUploadAnalysis analyzeUploadedDocument(RagDocument document, List<DocumentChunk> chunks, String text) {
+        String normalizedText = normalizeWhitespace(text);
+        List<DocumentChunk> representativeChunks = selectAnalysisRepresentativeChunks(chunks, 9);
+        String representativeText = representativeChunks.stream()
+                .map(DocumentChunk::getChunkText)
+                .collect(Collectors.joining("\n"));
+        String analysisText = normalizeWhitespace(document.getTitle() + " " + representativeText + " " + normalizedText);
+
+        Map<String, Integer> conceptScores = scoreComputerScienceConcepts(analysisText);
+        String inferredSubject = inferUploadedDocumentSubject(document, analysisText, conceptScores);
+        String inferredUnit = inferUploadedDocumentUnit(inferredSubject, conceptScores);
+        List<String> recommendedTags = buildUploadRecommendedTags(inferredSubject, inferredUnit, conceptScores);
+        String documentDifficulty = inferUploadDocumentDifficulty(chunks, normalizedText, conceptScores);
+        String confidence = defaultValue(document.getTrustLevel(), "보통");
+
+        return new DocumentUploadAnalysis(
+                inferredSubject,
+                inferredUnit,
+                recommendedTags,
+                documentDifficulty,
+                confidence
+        );
+    }
+
+    private List<DocumentChunk> selectAnalysisRepresentativeChunks(List<DocumentChunk> chunks, int limit) {
+        if (chunks.isEmpty()) {
+            return List.of();
+        }
+
+        List<DocumentChunk> contentChunks = chunks.stream()
+                .filter(this::isAnalysisContentChunk)
+                .toList();
+        List<DocumentChunk> source = contentChunks.isEmpty() ? chunks : contentChunks;
+        int targetLimit = Math.max(1, Math.min(limit, source.size()));
+
+        LinkedHashSet<DocumentChunk> selected = new LinkedHashSet<>();
+        int total = source.size();
+        int[][] windows = {
+                {0, Math.max(1, total / 3)},
+                {Math.max(0, total / 3), Math.max(1, (total * 2) / 3)},
+                {Math.max(0, (total * 2) / 3), total}
+        };
+
+        for (int[] window : windows) {
+            source.subList(window[0], Math.max(window[0], window[1])).stream()
+                    .max(Comparator.comparingDouble(this::scoreAnalysisChunk))
+                    .ifPresent(selected::add);
+        }
+
+        source.stream()
+                .sorted(Comparator.comparingDouble(this::scoreAnalysisChunk).reversed())
+                .forEach(chunk -> {
+                    if (selected.size() < targetLimit) {
+                        selected.add(chunk);
+                    }
+                });
+
+        return selected.stream()
+                .limit(targetLimit)
+                .toList();
+    }
+
+    private boolean isAnalysisContentChunk(DocumentChunk chunk) {
+        String text = normalizeWhitespace(chunk.getChunkText());
+        if (text.length() < 90) {
+            return false;
+        }
+        if (isStructuralAnalysisText(text)) {
+            return false;
+        }
+        return scoreAnalysisChunk(chunk) >= 2.0;
+    }
+
+    private double scoreAnalysisChunk(DocumentChunk chunk) {
+        String text = normalizeWhitespace(chunk.getChunkText());
+        String lower = text.toLowerCase(Locale.ROOT);
+        double score = 0.0;
+
+        if (text.length() >= 180) score += 1.0;
+        if (text.length() >= 360) score += 0.8;
+        if (text.matches(".*(다\\.|니다\\.|이다\\.|한다\\.|된다\\.|있다\\.|없다\\.).*")) score += 1.2;
+        if (text.matches(".*(정의|특징|구조|동작|과정|원리|비교|예를 들어|사용|관리|처리|설명).*")) score += 1.0;
+        if (countComputerScienceKeywordHits(lower) >= 2) score += 1.2;
+        if (countComputerScienceKeywordHits(lower) >= 5) score += 1.0;
+        if (isStructuralAnalysisText(text)) score -= 3.0;
+        if (lower.matches(".*\\b(section|chapter|contents|table of contents)\\b.*") || text.matches(".*(목차|차례|페이지).*")) score -= 1.5;
+
+        return score;
+    }
+
+    private boolean isStructuralAnalysisText(String text) {
+        String normalized = normalizeWhitespace(text);
+        String lower = normalized.toLowerCase(Locale.ROOT);
+        if (normalized.isBlank()) {
+            return true;
+        }
+        if (normalized.length() < 60) {
+            return true;
+        }
+        if (lower.matches("^(section|chapter|contents|table of contents)\\b.*") || normalized.matches("^(목차|차례|강의목표|학습목표)\\b.*")) {
+            return true;
+        }
+        int structuralHits = 0;
+        for (String marker : List.of("목차", "차례", "section", "chapter", "page", "페이지", "그림", "표 ")) {
+            if (lower.contains(marker.toLowerCase(Locale.ROOT))) {
+                structuralHits++;
+            }
+        }
+        boolean hasSentence = normalized.matches(".*(다\\.|니다\\.|이다\\.|한다\\.|된다\\.|있다\\.|없다\\.).*");
+        return structuralHits >= 2 && !hasSentence;
+    }
+
+    private String inferUploadedDocumentSubject(RagDocument document, String analysisText, Map<String, Integer> conceptScores) {
+        String text = (document.getTitle() + " " + analysisText).toLowerCase(Locale.ROOT);
+        Map<String, List<String>> subjectKeywords = buildComputerScienceSubjectKeywords();
+
+        String bestSubject = "컴퓨터공학";
+        int bestScore = 0;
+        int secondScore = 0;
+        for (Map.Entry<String, List<String>> entry : subjectKeywords.entrySet()) {
+            int score = 0;
+            for (String keyword : entry.getValue()) {
+                score += countOccurrences(text, keyword.toLowerCase(Locale.ROOT));
+            }
+            score += subjectConceptBonus(entry.getKey(), conceptScores);
+            if (score > bestScore) {
+                secondScore = bestScore;
+                bestScore = score;
+                bestSubject = entry.getKey();
+            } else if (score > secondScore) {
+                secondScore = score;
+            }
+        }
+
+        if (bestScore < 2) {
+            return "컴퓨터공학";
+        }
+        if (bestScore == secondScore && bestScore < 5) {
+            return "컴퓨터공학";
+        }
+        return bestSubject;
+    }
+
+    private int subjectConceptBonus(String subject, Map<String, Integer> conceptScores) {
+        Map<String, List<String>> subjectConcepts = Map.of(
+                "운영체제", List.of("프로세스 관리", "스레드", "CPU 스케줄링", "메모리 관리", "가상 메모리", "페이징"),
+                "데이터베이스", List.of("SQL", "정규화", "트랜잭션", "조인", "기본키", "외래키"),
+                "알고리즘", List.of("정렬 알고리즘", "그래프 탐색", "재귀 알고리즘", "시간 복잡도", "동적 계획법"),
+                "인공지능", List.of("머신러닝", "신경망", "상태 공간 탐색", "지식 표현", "추론"),
+                "네트워크", List.of("TCP/IP", "라우팅", "소켓 통신", "패킷", "HTTP"),
+                "소프트웨어공학", List.of("요구사항 분석", "설계 패턴", "테스트", "UML", "애자일"),
+                "컴퓨터구조", List.of("CPU", "캐시", "명령어", "파이프라인", "메모리 계층"),
+                "프로그래밍", List.of("클래스", "객체", "상속", "함수", "예외 처리")
+        );
+        return subjectConcepts.getOrDefault(subject, List.of()).stream()
+                .mapToInt(concept -> conceptScores.getOrDefault(concept, 0))
+                .sum();
+    }
+
+    private String inferUploadedDocumentUnit(String inferredSubject, Map<String, Integer> conceptScores) {
+        return conceptScores.entrySet().stream()
+                .filter(entry -> "컴퓨터공학".equals(inferredSubject) || isSubjectAlignedConcept(inferredSubject, entry.getKey()))
+                .filter(entry -> isValidAnalysisTag(entry.getKey()))
+                .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
+                .map(Map.Entry::getKey)
+                .findFirst()
+                .orElseGet(() -> fallbackUnitForSubject(inferredSubject, conceptScores));
+    }
+
+    private String fallbackUnitForSubject(String inferredSubject, Map<String, Integer> conceptScores) {
+        return conceptScores.entrySet().stream()
+                .filter(entry -> isValidAnalysisTag(entry.getKey()))
+                .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
+                .map(Map.Entry::getKey)
+                .findFirst()
+                .orElseGet(() -> switch (inferredSubject) {
+                    case "운영체제" -> "프로세스 관리";
+                    case "데이터베이스" -> "데이터 모델";
+                    case "알고리즘" -> "알고리즘 설계";
+                    case "인공지능" -> "인공지능 개념";
+                    case "네트워크" -> "네트워크 통신";
+                    case "소프트웨어공학" -> "소프트웨어 개발";
+                    case "컴퓨터구조" -> "컴퓨터 시스템 구조";
+                    case "프로그래밍" -> "프로그래밍 기초";
+                    default -> "핵심 개념";
+                });
+    }
+
+    private List<String> buildUploadRecommendedTags(String inferredSubject, String inferredUnit, Map<String, Integer> conceptScores) {
+        LinkedHashSet<String> tags = new LinkedHashSet<>();
+        if (isValidAnalysisTag(inferredUnit)) {
+            tags.add(inferredUnit);
+        }
+
+        conceptScores.entrySet().stream()
+                .filter(entry -> entry.getValue() > 0)
+                .filter(entry -> "컴퓨터공학".equals(inferredSubject) || isSubjectAlignedConcept(inferredSubject, entry.getKey()))
+                .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
+                .map(Map.Entry::getKey)
+                .filter(this::isValidAnalysisTag)
+                .forEach(tags::add);
+
+        if (tags.size() < 3) {
+            defaultTagsForSubject(inferredSubject).forEach(tags::add);
+        }
+
+        return tags.stream()
+                .filter(this::isValidAnalysisTag)
+                .distinct()
+                .limit(8)
+                .toList();
+    }
+
+    private boolean isSubjectAlignedConcept(String subject, String concept) {
+        return switch (subject) {
+            case "운영체제" -> List.of("프로세스", "스레드", "스케줄링", "메모리", "페이징", "페이지", "TLB", "교착상태", "파일 시스템").stream().anyMatch(concept::contains);
+            case "데이터베이스" -> List.of("SQL", "정규화", "트랜잭션", "조인", "키", "관계", "테이블", "인덱스").stream().anyMatch(concept::contains);
+            case "알고리즘" -> List.of("정렬", "탐색", "그래프", "재귀", "복잡도", "동적 계획", "해시", "트리").stream().anyMatch(concept::contains);
+            case "인공지능" -> List.of("머신러닝", "딥러닝", "신경망", "탐색", "지식 표현", "추론", "분류", "회귀").stream().anyMatch(concept::contains);
+            case "네트워크" -> List.of("TCP", "IP", "라우팅", "소켓", "패킷", "HTTP", "DNS", "프로토콜").stream().anyMatch(concept::contains);
+            case "소프트웨어공학" -> List.of("요구사항", "설계", "테스트", "UML", "애자일", "품질", "유지보수").stream().anyMatch(concept::contains);
+            case "컴퓨터구조" -> List.of("CPU", "캐시", "명령어", "파이프라인", "메모리 계층", "레지스터").stream().anyMatch(concept::contains);
+            case "프로그래밍" -> List.of("클래스", "객체", "상속", "함수", "변수", "예외", "인터페이스").stream().anyMatch(concept::contains);
+            default -> true;
+        };
+    }
+
+    private List<String> defaultTagsForSubject(String subject) {
+        return switch (subject) {
+            case "운영체제" -> List.of("프로세스 관리", "CPU 스케줄링", "메모리 관리", "가상 메모리", "파일 시스템");
+            case "데이터베이스" -> List.of("SQL", "정규화", "트랜잭션", "조인", "기본키");
+            case "알고리즘" -> List.of("정렬 알고리즘", "그래프 탐색", "재귀 알고리즘", "시간 복잡도", "동적 계획법");
+            case "인공지능" -> List.of("머신러닝", "상태 공간 탐색", "지식 표현", "추론", "신경망");
+            case "네트워크" -> List.of("TCP/IP", "라우팅", "소켓 통신", "패킷", "프로토콜");
+            case "소프트웨어공학" -> List.of("요구사항 분석", "소프트웨어 설계", "테스트", "UML", "애자일");
+            case "컴퓨터구조" -> List.of("CPU", "캐시", "명령어", "파이프라인", "메모리 계층");
+            case "프로그래밍" -> List.of("클래스", "객체", "상속", "함수", "예외 처리");
+            default -> List.of("컴퓨터공학", "핵심 개념", "시스템 구조");
+        };
+    }
+
+    private String inferUploadDocumentDifficulty(List<DocumentChunk> chunks, String text, Map<String, Integer> conceptScores) {
+        String normalized = normalizeWhitespace(text).toLowerCase(Locale.ROOT);
+        int definitionSignals = countAny(normalized, List.of("정의", "개요", "기초", "소개", "basic", "introduction", "overview"));
+        int mediumSignals = countAny(normalized, List.of("비교", "구조", "예제", "예시", "동작", "과정", "구현", "architecture", "example"));
+        int hardSignals = countAny(normalized, List.of("수식", "증명", "복잡도", "최적화", "파이프라인", "정규형", "손실 함수", "gradient", "complexity", "optimization"));
+        long richChunkCount = chunks.stream().filter(this::isAnalysisContentChunk).count();
+        int conceptVariety = (int) conceptScores.values().stream().filter(score -> score > 0).count();
+
+        int score = 0;
+        score += Math.min(3, hardSignals);
+        score += Math.min(2, conceptVariety / 5);
+        if (richChunkCount >= 12) score += 1;
+        if (mediumSignals >= 4) score += 1;
+        if (definitionSignals >= 5 && hardSignals <= 1) score -= 1;
+
+        if (score >= 6 && hardSignals >= 4 && richChunkCount >= 8) return "어려움";
+        if (score >= 2) return "보통";
+        return "쉬움";
+    }
+
+    private Map<String, Integer> scoreComputerScienceConcepts(String text) {
+        String lower = normalizeWhitespace(text).toLowerCase(Locale.ROOT);
+        Map<String, Integer> scores = new LinkedHashMap<>();
+        for (Map.Entry<String, List<String>> entry : buildComputerScienceConceptKeywords().entrySet()) {
+            int score = 0;
+            for (String keyword : entry.getValue()) {
+                score += countOccurrences(lower, keyword.toLowerCase(Locale.ROOT));
+            }
+            if (score > 0) {
+                scores.put(entry.getKey(), score);
+            }
+        }
+        return scores;
+    }
+
+    private Map<String, List<String>> buildComputerScienceSubjectKeywords() {
+        Map<String, List<String>> keywords = new LinkedHashMap<>();
+        keywords.put("운영체제", List.of("operating system", "os", "process", "thread", "memory management", "virtual memory", "paging", "scheduling", "deadlock", "프로세스", "스레드", "메모리", "페이징", "스케줄링", "교착상태", "운영체제"));
+        keywords.put("데이터베이스", List.of("database", "sql", "normalization", "transaction", "join", "table", "primary key", "foreign key", "데이터베이스", "정규화", "트랜잭션", "테이블", "기본키", "외래키", "조인"));
+        keywords.put("알고리즘", List.of("algorithm", "sorting", "search", "graph", "recursion", "time complexity", "dynamic programming", "알고리즘", "정렬", "탐색", "그래프", "재귀", "시간 복잡도", "동적 계획법"));
+        keywords.put("인공지능", List.of("artificial intelligence", "ai", "machine learning", "deep learning", "neural network", "knowledge representation", "inference", "state space", "인공지능", "머신러닝", "딥러닝", "신경망", "지식 표현", "추론", "상태 공간"));
+        keywords.put("네트워크", List.of("network", "tcp", "ip", "routing", "socket", "packet", "http", "dns", "네트워크", "라우팅", "소켓", "패킷", "프로토콜"));
+        keywords.put("소프트웨어공학", List.of("software engineering", "requirements", "uml", "design pattern", "testing", "agile", "maintenance", "소프트웨어공학", "요구사항", "설계 패턴", "테스트", "애자일", "유지보수"));
+        keywords.put("컴퓨터구조", List.of("computer architecture", "cpu", "cache", "instruction", "pipeline", "register", "memory hierarchy", "컴퓨터구조", "캐시", "명령어", "파이프라인", "레지스터", "메모리 계층"));
+        keywords.put("프로그래밍", List.of("programming", "class", "object", "inheritance", "function", "variable", "exception", "프로그래밍", "클래스", "객체", "상속", "함수", "변수", "예외"));
+        return keywords;
+    }
+
+    private Map<String, List<String>> buildComputerScienceConceptKeywords() {
+        Map<String, List<String>> keywords = new LinkedHashMap<>();
+        keywords.put("프로세스 관리", List.of("process management", "process", "프로세스 관리", "프로세스"));
+        keywords.put("스레드", List.of("thread", "스레드"));
+        keywords.put("CPU 스케줄링", List.of("cpu scheduling", "scheduling", "scheduler", "cpu 스케줄링", "스케줄링"));
+        keywords.put("메모리 관리", List.of("memory management", "메모리 관리", "주기억장치", "메모리 할당"));
+        keywords.put("가상 메모리", List.of("virtual memory", "가상 메모리"));
+        keywords.put("페이징", List.of("paging", "page table", "page fault", "tlb", "페이징", "페이지 테이블", "페이지 부재"));
+        keywords.put("교착상태", List.of("deadlock", "교착상태"));
+        keywords.put("파일 시스템", List.of("file system", "파일 시스템"));
+        keywords.put("SQL", List.of("sql", "select", "insert", "update", "delete", "SQL"));
+        keywords.put("정규화", List.of("normalization", "normal form", "정규화", "정규형", "함수 종속"));
+        keywords.put("트랜잭션", List.of("transaction", "acid", "commit", "rollback", "트랜잭션"));
+        keywords.put("조인", List.of("join", "inner join", "outer join", "조인"));
+        keywords.put("기본키", List.of("primary key", "기본키", "primary"));
+        keywords.put("외래키", List.of("foreign key", "외래키"));
+        keywords.put("인덱스", List.of("index", "b-tree", "인덱스"));
+        keywords.put("정렬 알고리즘", List.of("sorting", "sort", "bubble sort", "quick sort", "merge sort", "정렬", "버블 정렬", "퀵 정렬", "병합 정렬", "삽입 정렬"));
+        keywords.put("그래프 탐색", List.of("graph search", "bfs", "dfs", "그래프 탐색", "너비 우선", "깊이 우선"));
+        keywords.put("재귀 알고리즘", List.of("recursion", "recursive", "재귀"));
+        keywords.put("시간 복잡도", List.of("time complexity", "big-o", "시간 복잡도", "빅오"));
+        keywords.put("동적 계획법", List.of("dynamic programming", "dp", "동적 계획법"));
+        keywords.put("머신러닝", List.of("machine learning", "머신러닝", "기계학습"));
+        keywords.put("신경망", List.of("neural network", "deep learning", "신경망", "딥러닝"));
+        keywords.put("상태 공간 탐색", List.of("state space", "search space", "상태 공간", "탐색 공간"));
+        keywords.put("지식 표현", List.of("knowledge representation", "지식 표현"));
+        keywords.put("추론", List.of("inference", "reasoning", "추론"));
+        keywords.put("분류", List.of("classification", "classifier", "분류"));
+        keywords.put("회귀", List.of("regression", "회귀"));
+        keywords.put("TCP/IP", List.of("tcp/ip", "tcp", "ip", "TCP", "IP"));
+        keywords.put("라우팅", List.of("routing", "router", "라우팅", "라우터"));
+        keywords.put("소켓 통신", List.of("socket", "소켓"));
+        keywords.put("패킷", List.of("packet", "패킷"));
+        keywords.put("프로토콜", List.of("protocol", "프로토콜"));
+        keywords.put("요구사항 분석", List.of("requirements analysis", "requirement", "요구사항", "요구 분석"));
+        keywords.put("소프트웨어 설계", List.of("software design", "architecture", "소프트웨어 설계", "아키텍처"));
+        keywords.put("설계 패턴", List.of("design pattern", "설계 패턴"));
+        keywords.put("테스트", List.of("testing", "test case", "테스트"));
+        keywords.put("UML", List.of("uml", "UML"));
+        keywords.put("애자일", List.of("agile", "scrum", "애자일", "스크럼"));
+        keywords.put("CPU", List.of("cpu", "processor", "CPU", "프로세서"));
+        keywords.put("캐시", List.of("cache", "캐시"));
+        keywords.put("명령어", List.of("instruction", "isa", "명령어"));
+        keywords.put("파이프라인", List.of("pipeline", "pipelining", "파이프라인"));
+        keywords.put("메모리 계층", List.of("memory hierarchy", "메모리 계층"));
+        keywords.put("클래스", List.of("class", "클래스"));
+        keywords.put("객체", List.of("object", "객체"));
+        keywords.put("상속", List.of("inheritance", "상속"));
+        keywords.put("함수", List.of("function", "method", "함수", "메서드"));
+        keywords.put("변수", List.of("variable", "변수"));
+        keywords.put("예외 처리", List.of("exception", "예외", "예외 처리"));
+        return keywords;
+    }
+
+    private int countComputerScienceKeywordHits(String lowerText) {
+        return buildComputerScienceConceptKeywords().values().stream()
+                .flatMap(List::stream)
+                .mapToInt(keyword -> lowerText.contains(keyword.toLowerCase(Locale.ROOT)) ? 1 : 0)
+                .sum();
+    }
+
+    private int countAny(String lowerText, List<String> keywords) {
+        int count = 0;
+        for (String keyword : keywords) {
+            count += countOccurrences(lowerText, keyword.toLowerCase(Locale.ROOT));
+        }
+        return count;
+    }
+
+    private int countOccurrences(String text, String keyword) {
+        if (text == null || keyword == null || keyword.isBlank()) {
+            return 0;
+        }
+        int count = 0;
+        int index = 0;
+        while ((index = text.indexOf(keyword, index)) >= 0) {
+            count++;
+            index += keyword.length();
+        }
+        return count;
+    }
+
+    private boolean isValidAnalysisTag(String value) {
+        String tag = normalizeWhitespace(value);
+        if (tag.length() < 2 || tag.length() > 30) {
+            return false;
+        }
+        String lower = tag.toLowerCase(Locale.ROOT);
+        Set<String> blocked = Set.of(
+                "목차", "차례", "section", "chapter", "있는", "없는", "그리고", "또는", "본문", "페이지", "그림", "표", "예제", "문제", "분류 필요",
+                "contents", "table of contents", "page", "figure", "example", "exercise", "핵심 개념"
+        );
+        if (blocked.contains(lower) || blocked.contains(tag)) {
+            return false;
+        }
+        return !tag.matches("^[0-9.() -]+$")
+                && !tag.matches("^(은|는|이|가|을|를|의|와|과|도|로|으로)$")
+                && !tag.matches("(?i)^section\\s*\\d+$")
+                && !tag.matches("(?i)^chapter\\s*\\d+$");
+    }
+
+    private String cleanAnalysisLabel(String value, String fallback) {
+        String cleaned = normalizeWhitespace(value)
+                .replaceAll("[\\r\\n\\t]", " ")
+                .replaceAll("\\s+", " ")
+                .replaceAll("(?i)^section\\s*\\d+\\s*", "")
+                .replaceAll("(?i)^chapter\\s*\\d+\\s*", "")
+                .trim();
+        if (!isValidAnalysisTag(cleaned)) {
+            return fallback;
+        }
+        if (cleaned.length() > 28) {
+            return cleaned.substring(0, 28).trim();
+        }
+        return cleaned;
+    }
     private int scoreChunk(String query, String chunkText) {
         List<String> tokens = extractSearchTokens(query);
         int score = 0;
@@ -2799,5 +3273,14 @@ public class RagService {
     }
 
     private record InlineConcept(String concept, String explanation) {
+    }
+
+    private record DocumentUploadAnalysis(
+            String inferredSubject,
+            String inferredUnit,
+            List<String> recommendedTags,
+            String documentDifficulty,
+            String confidence
+    ) {
     }
 }

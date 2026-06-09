@@ -6,7 +6,7 @@
     <title>AI Tutor</title>
     <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
-    <link rel="stylesheet" href="/app.css?v=20260608-workspace-responsive-1">
+    <link rel="stylesheet" href="/app.css?v=20260609-upload-analysis-tags-6">
 </head>
 <body>
 <div class="app-shell">
@@ -157,9 +157,10 @@
 
                 <div class="dashboard-side">
                     <article class="home-card new-study-card">
-                        <div class="section-heading-with-icon">
+                        <div class="section-heading-with-icon new-study-heading">
                             <span class="heading-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 14.4 9.6 21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4Z"/></svg></span>
                             <div><p class="card-kicker">NEW WORKSPACE</p><h2>새 공부 시작</h2></div>
+                            <button id="new-study-analysis-button" type="button" class="analysis-toggle-button">PDF 분석</button>
                         </div>
                         <p>PDF를 업로드하고 새 세션을 만들어 바로 학습 워크스페이스로 이동합니다.</p>
                         <button id="start-new-study-button" type="button" class="hidden">새 공부 시작</button>
@@ -178,6 +179,7 @@
                                     <option value="낮음">낮음</option>
                                 </select>
                             </label>
+                            <div id="new-study-analysis-panel" class="upload-analysis-panel hidden"></div>
                             <button type="submit" class="dashboard-submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg><span>업로드 후 시작</span></button>
                         </form>
                     </article>
@@ -216,6 +218,7 @@
             <aside class="workspace-panel document-workspace-panel">
                 <div class="section-header">
                     <h2>PDF 파일 <span class="panel-help">i</span></h2>
+                    <button id="toggle-upload-analysis-button" type="button" class="analysis-toggle-button hidden">분석 결과</button>
                 </div>
 
                 <form id="workspace-upload-form" class="stack compact-stack">
@@ -244,6 +247,7 @@
                     <button type="submit" class="workspace-upload-button">PDF 업로드</button>
                 </form>
 
+                <div id="upload-analysis-panel" class="upload-analysis-panel hidden"></div>
                 <div class="document-list-header"><span id="uploaded-document-count">업로드된 파일</span></div>
                 <div id="document-list" class="document-list"></div>
                 <div id="selected-document-footer" class="selected-document-footer">선택된 파일 0개</div>
@@ -429,6 +433,6 @@
     </article>
 </template>
 
-<script src="/app.js?v=20260608-workspace-responsive-1"></script>
+<script src="/app.js?v=20260609-upload-analysis-tags-6"></script>
 </body>
 </html>
