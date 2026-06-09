@@ -168,8 +168,8 @@
                             <label><span>세션 제목</span><input id="new-study-title" type="text" value="새 학습 세션" required></label>
                             <label><span>PDF 파일</span><input id="new-study-file" type="file" accept="application/pdf" required></label>
                             <div class="form-grid-2">
-                                <label><span>과목</span><input id="new-study-subject" type="text" value="컴퓨터과학"></label>
-                                <label><span>단원명</span><input id="new-study-unit" type="text" value="알고리즘"></label>
+                                <label><span>과목</span><input id="new-study-subject" type="text"></label>
+                                <label><span>단원명</span><input id="new-study-unit" type="text"></label>
                             </div>
                             <label>
                                 <span>신뢰도</span>
@@ -233,11 +233,11 @@
                     <div class="workspace-upload-options">
                     <label>
                         <span>과목</span>
-                        <input id="workspace-subject" type="text" value="컴퓨터과학">
+                        <input id="workspace-subject" type="text">
                     </label>
                     <label>
                         <span>단원명</span>
-                        <input id="workspace-unit" type="text" value="알고리즘">
+                        <input id="workspace-unit" type="text">
                     </label>
                     <label>
                         <span>신뢰도</span>
@@ -262,7 +262,7 @@
                 <div id="message-list" class="message-list"></div>
 
                 <form id="chat-form" class="chat-form">
-                    <textarea id="chat-question" rows="3" placeholder="질문을 입력하세요." required></textarea>
+                    <textarea id="chat-question" rows="3" placeholder="궁금한 개념을 질문하거나 처음이시라면 !도움말을 입력하세요." required></textarea>
                     <div class="chat-form-actions">
                         <button id="chat-attach-button" type="button" class="chat-attach-icon" aria-label="파일 첨부"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20 11.5-7.8 7.8a5 5 0 0 1-7.1-7.1l8.5-8.5a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-2.8-2.8l7.8-7.8"/></svg></button>
                         <button type="submit">보내기 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg></button>
@@ -280,10 +280,10 @@
                     <label>
                         <span>문제 타입</span>
                         <select id="quiz-type">
-                            <option value="mixed">mixed</option>
-                            <option value="multiple_choice">multiple_choice</option>
-                            <option value="ox">ox</option>
-                            <option value="short_answer">short_answer</option>
+                            <option value="mixed">혼합</option>
+                            <option value="multiple_choice">객관식</option>
+                            <option value="ox">O/X</option>
+                            <option value="short_answer">주관식</option>
                         </select>
                     </label>
                     <label>

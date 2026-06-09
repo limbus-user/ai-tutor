@@ -1171,6 +1171,11 @@ label {
     background: rgba(255, 255, 255, 0.72);
 }
 
+.chat-empty-space {
+    min-height: 120px;
+    color: transparent;
+}
+
 .quiz-session-layout {
     margin-top: 14px;
 }
@@ -1860,19 +1865,23 @@ label {
 
 .dashboard-columns {
     display: grid;
-    grid-template-columns: minmax(0, 1.05fr) minmax(420px, 1fr);
+    grid-template-columns: repeat(2, minmax(420px, 1fr));
     gap: 14px;
     margin-top: 14px;
+    align-items: stretch;
 }
 
 .home-dashboard .history-card {
     grid-column: auto;
+    align-self: stretch;
+    height: 100%;
 }
 
 .dashboard-side {
     display: grid;
     gap: 14px;
     align-content: start;
+    align-self: start;
 }
 
 .home-dashboard .home-card {
@@ -1880,6 +1889,11 @@ label {
     padding: 20px;
     border-radius: 18px;
     background: rgba(255, 255, 255, 0.96);
+}
+
+.home-dashboard .history-card,
+.home-dashboard .new-study-card {
+    padding: 20px;
 }
 
 .card-kicker {
@@ -2571,9 +2585,20 @@ label {
     padding: 12px 9px;
     border: 1px solid #d8e1f0;
     border-radius: 11px;
-    overflow: hidden;
+    overflow: visible;
     transform: none;
     min-width: 0;
+}
+
+#workspace-view .document-row:has(.document-menu:not(.hidden)) {
+    z-index: 20;
+}
+
+#workspace-view .document-menu {
+    top: calc(100% - 4px);
+    right: 8px;
+    left: auto;
+    z-index: 30;
 }
 
 #workspace-view .document-row-open {

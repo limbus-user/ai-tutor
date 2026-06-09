@@ -340,7 +340,7 @@ function renderHomeDashboard() {
     return;
   }
 
-  state.homeRecentMessages.forEach((message) => {
+  state.homeRecentMessages.slice(0, 3).forEach((message) => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "recent-session-item";
@@ -447,7 +447,7 @@ function renderUploadAnalysisCard(documentInfo) {
   applyButton.textContent = "입력값 반영";
   applyButton.addEventListener("click", (event) => {
     event.stopPropagation();
-    applyUploadAnalysisToInputs(analysis, documentInfo.analysisInputScope || "workspace");
+    void applyUploadAnalysis(documentInfo, applyButton);
   });
   const status = document.createElement("span");
   status.textContent = documentInfo.analysisStatus || "업로드 완료";
@@ -573,6 +573,78 @@ function applyUploadAnalysisToInputs(analysis, scope = "workspace") {
   }
 }
 
+function isUsableAnalysisValue(value, ignoredValues = []) {
+  const normalized = String(value || "").trim();
+  return normalized && normalized !== "-" && !ignoredValues.includes(normalized);
+}
+
+async function applyUploadAnalysis(documentInfo, button) {
+  const analysis = documentInfo?.uploadAnalysis;
+  if (!analysis) return;
+
+  const scope = documentInfo.analysisInputScope || "workspace";
+  applyUploadAnalysisToInputs(analysis, scope);
+
+  if (scope === "new-study" || !documentInfo.documentId || String(documentInfo.documentId).includes("preview")) {
+    return;
+  }
+
+  const subject = isUsableAnalysisValue(analysis.inferredSubject, ["분류 필요"])
+      ? analysis.inferredSubject
+      : documentInfo.subject;
+  const unitName = isUsableAnalysisValue(analysis.inferredUnit)
+      ? analysis.inferredUnit
+      : documentInfo.unitName;
+  const trustLevel = isUsableAnalysisValue(analysis.confidence)
+      ? analysis.confidence
+      : documentInfo.trustLevel;
+
+  const previousText = button?.textContent;
+  if (button) {
+    button.disabled = true;
+    button.textContent = "반영 중";
+  }
+
+  try {
+    const updated = await apiFetch(`/api/rag/documents/${documentInfo.documentId}/metadata`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subject, unitName, trustLevel }),
+    });
+
+    await fetchDocumentsCatalog();
+    updateCurrentWorkspaceDocumentMetadata(documentInfo.documentId, updated);
+    renderDocuments();
+  } catch (error) {
+    if (button) {
+      button.disabled = false;
+      button.textContent = previousText;
+    }
+    alert(formatErrorMessage(error, "분석 결과를 문서 정보에 반영하지 못했습니다."));
+  }
+}
+
+function updateCurrentWorkspaceDocumentMetadata(documentId, updated) {
+  state.currentWorkspace.documents = (state.currentWorkspace?.documents || []).map((document) =>
+      document.documentId === documentId
+          ? {
+            ...document,
+            subject: updated.subject,
+            unitName: updated.unitName,
+            trustLevel: updated.trustLevel,
+            uploadAnalysis: document.uploadAnalysis
+                ? {
+                  ...document.uploadAnalysis,
+                  inferredSubject: updated.subject,
+                  inferredUnit: updated.unitName,
+                  confidence: updated.trustLevel,
+                }
+                : document.uploadAnalysis,
+          }
+          : document,
+  );
+}
+
 function renderNewStudyAnalysis() {
   const panel = document.getElementById("new-study-analysis-panel");
   const button = document.getElementById("new-study-analysis-button");
@@ -675,14 +747,7 @@ function updateAnalysisToggleButton() {
   const button = document.getElementById("toggle-upload-analysis-button");
   if (!button) return;
 
-  const documents = state.currentWorkspace?.documents || [];
-  const latestId = state.currentWorkspace?.latestUploadAnalysisDocumentId;
-  const hasAnalysisTarget = documents.some((documentInfo) =>
-    documentInfo.documentId === latestId || documentInfo.uploadAnalysis,
-  );
-
-  button.classList.toggle("hidden", !hasAnalysisTarget);
-  button.textContent = state.currentWorkspace?.activeAnalysisDocumentId ? "분석 닫기" : "분석 결과";
+  button.classList.add("hidden");
 }
 
 async function showDocumentAnalysis(documentId) {
@@ -917,24 +982,7 @@ async function editDocumentMetadata(documentInfo) {
 
     await fetchDocumentsCatalog();
 
-    state.currentWorkspace.documents = (state.currentWorkspace?.documents || []).map((document) =>
-        document.documentId === documentInfo.documentId
-            ? {
-              ...document,
-              subject: updated.subject,
-              unitName: updated.unitName,
-              trustLevel: updated.trustLevel,
-              uploadAnalysis: document.uploadAnalysis
-                  ? {
-                    ...document.uploadAnalysis,
-                    inferredSubject: updated.subject,
-                    inferredUnit: updated.unitName,
-                    confidence: updated.trustLevel,
-                  }
-                  : document.uploadAnalysis,
-            }
-            : document,
-    );
+    updateCurrentWorkspaceDocumentMetadata(documentInfo.documentId, updated);
 
     alert("문서 정보가 수정되었습니다.");
     renderDocuments();
@@ -1039,7 +1087,7 @@ function renderMessages() {
   container.innerHTML = "";
 
   if (!state.currentMessages.length) {
-    container.innerHTML = '<div class="empty-box">기존 대화가 없습니다. 질문을 보내서 시작하세요.</div>';
+    container.innerHTML = '<div class="empty-box chat-empty-space" aria-hidden="true"></div>';
     return;
   }
 
@@ -2470,18 +2518,14 @@ async function sendChat(event) {
 
     const selectedDocumentIds = getSelectedQuizDocumentIds();
 
-    if (question === "!학습코스" && !selectedDocumentIds.length) {
-      throw new Error("학습 코스를 만들 PDF를 하나 이상 선택해 주세요.");
+    if (question === "!학습코스" && selectedDocumentIds.length !== 1) {
+      throw new Error("학습 코스는 PDF 1개만 선택한 상태에서 만들 수 있습니다.");
     }
 
     const payload = {
       question,
       documentIds: selectedDocumentIds,
     };
-
-    if (selectedDocumentIds.length === 1) {
-      payload.documentId = selectedDocumentIds[0];
-    }
 
     if (selectedDocumentIds.length === 1) {
       payload.documentId = selectedDocumentIds[0];

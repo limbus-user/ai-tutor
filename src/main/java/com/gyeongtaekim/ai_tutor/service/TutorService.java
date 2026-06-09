@@ -46,6 +46,19 @@ public class TutorService {
 
         chatMessageRepository.save(new ChatMessage(session, ChatMessage.MessageRole.USER, question, null));
 
+        if ("!도움말".equals(question)) {
+            String answer = buildHelpAnswer();
+            chatMessageRepository.save(new ChatMessage(
+                    session,
+                    ChatMessage.MessageRole.ASSISTANT,
+                    answer,
+                    null
+            ));
+            session.touch();
+            chatSessionRepository.save(session);
+            return new TutorAskResponse(sessionId, question, answer, List.of());
+        }
+
         LearningMemory memory = learningMemoryRepository.findByUserId(session.getUser().getId()).orElse(null);
         List<ChatMessage> recentMessages = chatMessageRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
         String groundedQuestion = rewriteQuestionWithContext(question, recentMessages);
@@ -80,6 +93,31 @@ public class TutorService {
         return new TutorAskResponse(sessionId, question, answer, ragResponse.getSources());
     }
 
+    private String buildHelpAnswer() {
+        return """
+                사용 방법 안내
+
+                1. PDF 파일을 업로드합니다.
+                2. 왼쪽 PDF 목록에서 공부할 PDF 1개를 선택합니다.
+                3. 처음이라면 채팅창에 !학습코스 를 입력하세요.
+                4. 이후에는 궁금한 개념을 자연어로 질문하면 됩니다.
+
+                예시 질문
+                - 이 PDF의 핵심 개념을 쉽게 설명해줘
+                - 이 단원에서 중요한 용어를 정리해줘
+                - 헷갈리기 쉬운 개념을 비교해줘
+                - 시험에 나올 만한 포인트를 알려줘
+
+                명령어
+                - !학습코스: 선택한 PDF 1개를 기준으로 학습 순서와 복습 계획을 만듭니다.
+                - !도움말: 사용 방법을 다시 보여줍니다.
+
+                주의
+                - 학습코스는 PDF 1개만 선택한 상태에서 사용하는 것을 권장합니다.
+                - 여러 PDF를 선택하면 일반 질문 답변에는 활용할 수 있지만, 처음 학습코스는 한 문서 기준이 더 정확합니다.
+                """;
+    }
+
     private String buildGroundedAnswer(
             String question,
             RagQueryResponse ragResponse,
@@ -103,7 +141,7 @@ public class TutorService {
                             If the evidence is insufficient, say so clearly.
                             Answer in Korean.
                             """,
-                    buildPrompt(question, ragResponse, memory, recentMessages)
+                    buildPrompt(question, ragResponse, memory, recentMessages, studyCourseMode)
             );
             if (ollamaAnswer != null && !ollamaAnswer.isBlank()) {
                 return studyCourseMode
@@ -184,14 +222,18 @@ public class TutorService {
         cleaned = cleaned.replaceAll("(?is)\\n*\\[Sources\\].*$", "");
         cleaned = cleaned.replaceAll("(?is)\\n*출처\\s*:\\s*.*$", "");
         cleaned = cleaned.replaceAll("(?im)^\\s*-\\s*.+\\[chunk\\s+\\d+\\]\\s*$", "");
+        cleaned = cleaned.replaceAll("(?m)^\\s*#{1,6}\\s*", "");
+        cleaned = cleaned.replaceAll("(?m)^\\s*[-*]\\s+(?=(AI가 생성한 통합 학습 코스|선택 문서|학습 목표|핵심 개념|문서별 핵심 요약|추천 학습 순서)\\b)", "");
         cleaned = cleaned.replaceAll("\\n{3,}", "\n\n").trim();
         return cleaned;
     }
+
     private String buildPrompt(
             String question,
             RagQueryResponse ragResponse,
             LearningMemory memory,
-            List<ChatMessage> recentMessages
+            List<ChatMessage> recentMessages,
+            boolean studyCourseMode
     ) {
         StringBuilder prompt = new StringBuilder();
         prompt.append("You are a grounded AI tutor.\n");
@@ -208,10 +250,12 @@ public class TutorService {
             prompt.append("Preferences: ").append(memory.getPreferences()).append("\n\n");
         }
 
-        prompt.append("[Recent Conversation]\n");
-        recentMessages.stream()
-                .skip(Math.max(0, recentMessages.size() - 6))
-                .forEach(message -> prompt.append(message.getRole().name()).append(": ").append(message.getContent()).append("\n"));
+        if (!studyCourseMode) {
+            prompt.append("[Recent Conversation]\n");
+            recentMessages.stream()
+                    .skip(Math.max(0, recentMessages.size() - 6))
+                    .forEach(message -> prompt.append(message.getRole().name()).append(": ").append(message.getContent()).append("\n"));
+        }
 
         prompt.append("\n[Evidence]\n");
         prompt.append(ragResponse.getAnswer()).append("\n\n");
@@ -228,6 +272,10 @@ public class TutorService {
         prompt.append("5. Include a simple example or comparison when it helps understanding, but do not invent facts outside the evidence.\n");
         prompt.append("6. If the evidence is limited, clearly say what is confirmed and what is not confirmed.\n");
         prompt.append("7. Do not include a source list or citation heading in the body.\n");
+        if (studyCourseMode) {
+            prompt.append("8. Do not use markdown heading markers such as #, ##, ###, ####, or bullet decorations for section titles.\n");
+            prompt.append("9. Write section titles as plain Korean text, for example: AI가 생성한 통합 학습 코스, 선택 문서, 학습 목표.\n");
+        }
         return prompt.toString();
     }
 

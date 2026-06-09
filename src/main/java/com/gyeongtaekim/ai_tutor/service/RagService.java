@@ -1070,6 +1070,7 @@ public class RagService {
                     .map(chunk -> TextSegment.from(chunk.getChunkText()))
                     .toList();
             List<Embedding> embeddings = embeddingModel.embedAll(segments).content();
+            persistEmbeddingsToPgVector(chunks, embeddings);
             embeddingStore.addAll(embeddings, chunks);
             embeddingsInitialized = true;
         } catch (Exception ignored) {
@@ -1089,18 +1090,21 @@ public class RagService {
                     .toList();
             List<Embedding> embeddings = embeddingModel.embedAll(segments).content();
 
-            for (int i = 0; i < chunks.size() && i < embeddings.size(); i++) {
-                try {
-                    pgVectorChunkSearchRepository.updateEmbedding(chunks.get(i).getId(), embeddings.get(i).vector());
-                } catch (Exception ignored) {
-                    // Keep in-memory fallback populated even when pgvector is unavailable.
-                }
-            }
-
+            persistEmbeddingsToPgVector(chunks, embeddings);
             embeddingStore.addAll(embeddings, chunks);
             embeddingsInitialized = true;
         } catch (Exception ignored) {
             embeddingsInitialized = false;
+        }
+    }
+
+    private void persistEmbeddingsToPgVector(List<DocumentChunk> chunks, List<Embedding> embeddings) {
+        for (int i = 0; i < chunks.size() && i < embeddings.size(); i++) {
+            try {
+                pgVectorChunkSearchRepository.updateEmbedding(chunks.get(i).getId(), embeddings.get(i).vector());
+            } catch (Exception ignored) {
+                // Keep in-memory fallback populated even when pgvector is unavailable.
+            }
         }
     }
 
@@ -1169,6 +1173,25 @@ public class RagService {
         String documentDifficulty = inferUploadDocumentDifficulty(chunks, normalizedText, conceptScores);
         String confidence = defaultValue(document.getTrustLevel(), "보통");
 
+        DocumentUploadAnalysis ruleBasedAnalysis = new DocumentUploadAnalysis(
+                inferredSubject,
+                inferredUnit,
+                recommendedTags,
+                documentDifficulty,
+                confidence
+        );
+
+        DocumentUploadAnalysis llmAnalysis = refineUploadAnalysisWithLocalLlm(
+                document,
+                representativeText,
+                analysisText,
+                conceptScores,
+                ruleBasedAnalysis
+        );
+        if (llmAnalysis != null) {
+            return llmAnalysis;
+        }
+
         return new DocumentUploadAnalysis(
                 inferredSubject,
                 inferredUnit,
@@ -1176,6 +1199,140 @@ public class RagService {
                 documentDifficulty,
                 confidence
         );
+    }
+
+    private DocumentUploadAnalysis refineUploadAnalysisWithLocalLlm(
+            RagDocument document,
+            String representativeText,
+            String analysisText,
+            Map<String, Integer> conceptScores,
+            DocumentUploadAnalysis fallback
+    ) {
+        if (!ollamaService.isEnabled()) {
+            return null;
+        }
+
+        String conceptScoreText = conceptScores.entrySet().stream()
+                .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
+                .limit(15)
+                .map(entry -> entry.getKey() + "=" + entry.getValue())
+                .collect(Collectors.joining(", "));
+        String allowedSubjects = String.join(", ", buildComputerScienceSubjectKeywords().keySet());
+        String response = ollamaService.generateJson(
+                """
+                You classify Korean computer-science study PDFs.
+                Return strict JSON only.
+                Do not use markdown.
+                Do not invent a topic that is not supported by the evidence.
+                Prefer the main repeated learning topic over cover pages, table of contents, file names, page numbers, or generic words.
+                If the PDF is about data analysis tools such as Pandas, DataFrame, Series, NumPy, preprocessing, or visualization, classify it as 데이터분석.
+                If the PDF is about RAG, embeddings, pgvector, GPT Vision, vector search, or local LLM systems, classify it as RAG 시스템.
+                """,
+                """
+                [Allowed subjects]
+                %s
+
+                [File title]
+                %s
+
+                [Rule-based guess]
+                subject=%s
+                unit=%s
+                tags=%s
+                difficulty=%s
+
+                [Keyword scores]
+                %s
+
+                [Representative PDF evidence]
+                %s
+
+                [Whole-text excerpt]
+                %s
+
+                Return JSON:
+                {"subject":"one allowed subject","unit":"specific chapter/unit, 2-30 Korean chars","tags":["3-8 concise tags"],"difficulty":"쉬움|보통|어려움","confidence":"낮음|보통|높음"}
+                """.formatted(
+                        allowedSubjects,
+                        document.getTitle(),
+                        fallback.inferredSubject(),
+                        fallback.inferredUnit(),
+                        fallback.recommendedTags(),
+                        fallback.documentDifficulty(),
+                        conceptScoreText.isBlank() ? "none" : conceptScoreText,
+                        abbreviate(representativeText, 2200),
+                        abbreviate(analysisText, 2200)
+                ),
+                500
+        );
+
+        if (response == null || response.isBlank()) {
+            return null;
+        }
+
+        try {
+            com.fasterxml.jackson.databind.JsonNode root =
+                    new com.fasterxml.jackson.databind.ObjectMapper().readTree(extractJsonObject(response));
+            String subject = normalizeUploadSubject(root.path("subject").asText(), fallback.inferredSubject());
+            String unit = cleanAnalysisLabel(root.path("unit").asText(), fallback.inferredUnit());
+            String difficulty = normalizeUploadDifficulty(root.path("difficulty").asText(), fallback.documentDifficulty());
+            String confidence = normalizeUploadConfidence(root.path("confidence").asText(), fallback.confidence());
+            List<String> tags = readUploadAnalysisTags(root.path("tags"), fallback.recommendedTags());
+
+            if (!isSubjectAlignedConcept(subject, unit) && !"컴퓨터공학".equals(subject)) {
+                unit = inferUploadedDocumentUnit(subject, conceptScores);
+            }
+            if (tags.isEmpty()) {
+                tags = buildUploadRecommendedTags(subject, unit, conceptScores);
+            }
+
+            return new DocumentUploadAnalysis(subject, unit, tags, difficulty, confidence);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private String normalizeUploadSubject(String value, String fallback) {
+        String subject = normalizeWhitespace(value);
+        if (buildComputerScienceSubjectKeywords().containsKey(subject)) {
+            return subject;
+        }
+        return buildComputerScienceSubjectKeywords().containsKey(fallback) ? fallback : "컴퓨터공학";
+    }
+
+    private String normalizeUploadDifficulty(String value, String fallback) {
+        String difficulty = normalizeWhitespace(value);
+        if (List.of("쉬움", "보통", "어려움").contains(difficulty)) {
+            return difficulty;
+        }
+        return List.of("쉬움", "보통", "어려움").contains(fallback) ? fallback : "보통";
+    }
+
+    private String normalizeUploadConfidence(String value, String fallback) {
+        String confidence = normalizeWhitespace(value);
+        if (List.of("낮음", "보통", "높음").contains(confidence)) {
+            return confidence;
+        }
+        return List.of("낮음", "보통", "높음").contains(fallback) ? fallback : "보통";
+    }
+
+    private List<String> readUploadAnalysisTags(com.fasterxml.jackson.databind.JsonNode tagsNode, List<String> fallback) {
+        LinkedHashSet<String> tags = new LinkedHashSet<>();
+        if (tagsNode != null && tagsNode.isArray()) {
+            for (com.fasterxml.jackson.databind.JsonNode tagNode : tagsNode) {
+                String tag = cleanAnalysisLabel(tagNode.asText(), "");
+                if (isValidAnalysisTag(tag)) {
+                    tags.add(tag);
+                }
+            }
+        }
+        if (tags.isEmpty()) {
+            fallback.stream()
+                    .map(tag -> cleanAnalysisLabel(tag, ""))
+                    .filter(this::isValidAnalysisTag)
+                    .forEach(tags::add);
+        }
+        return tags.stream().limit(8).toList();
     }
 
     private List<DocumentChunk> selectAnalysisRepresentativeChunks(List<DocumentChunk> chunks, int limit) {
@@ -1276,7 +1433,7 @@ public class RagService {
         for (Map.Entry<String, List<String>> entry : subjectKeywords.entrySet()) {
             int score = 0;
             for (String keyword : entry.getValue()) {
-                score += countOccurrences(text, keyword.toLowerCase(Locale.ROOT));
+                score += countKeywordHits(text, keyword.toLowerCase(Locale.ROOT));
             }
             score += subjectConceptBonus(entry.getKey(), conceptScores);
             if (score > bestScore) {
@@ -1306,7 +1463,9 @@ public class RagService {
                 "네트워크", List.of("TCP/IP", "라우팅", "소켓 통신", "패킷", "HTTP"),
                 "소프트웨어공학", List.of("요구사항 분석", "설계 패턴", "테스트", "UML", "애자일"),
                 "컴퓨터구조", List.of("CPU", "캐시", "명령어", "파이프라인", "메모리 계층"),
-                "프로그래밍", List.of("클래스", "객체", "상속", "함수", "예외 처리")
+                "프로그래밍", List.of("클래스", "객체", "상속", "함수", "예외 처리"),
+                "데이터분석", List.of("Pandas", "DataFrame", "Series", "NumPy", "데이터 전처리", "데이터 시각화"),
+                "RAG 시스템", List.of("RAG", "임베딩", "pgvector", "GPT Vision", "로컬 LLM", "벡터 검색")
         );
         return subjectConcepts.getOrDefault(subject, List.of()).stream()
                 .mapToInt(concept -> conceptScores.getOrDefault(concept, 0))
@@ -1338,6 +1497,8 @@ public class RagService {
                     case "소프트웨어공학" -> "소프트웨어 개발";
                     case "컴퓨터구조" -> "컴퓨터 시스템 구조";
                     case "프로그래밍" -> "프로그래밍 기초";
+                    case "데이터분석" -> "Pandas 데이터 처리";
+                    case "RAG 시스템" -> "RAG 구성 요소";
                     default -> "핵심 개념";
                 });
     }
@@ -1377,6 +1538,8 @@ public class RagService {
             case "소프트웨어공학" -> List.of("요구사항", "설계", "테스트", "UML", "애자일", "품질", "유지보수").stream().anyMatch(concept::contains);
             case "컴퓨터구조" -> List.of("CPU", "캐시", "명령어", "파이프라인", "메모리 계층", "레지스터").stream().anyMatch(concept::contains);
             case "프로그래밍" -> List.of("클래스", "객체", "상속", "함수", "변수", "예외", "인터페이스").stream().anyMatch(concept::contains);
+            case "데이터분석" -> List.of("Pandas", "DataFrame", "Series", "NumPy", "전처리", "시각화", "데이터 분석").stream().anyMatch(concept::contains);
+            case "RAG 시스템" -> List.of("RAG", "임베딩", "pgvector", "GPT Vision", "로컬 LLM", "벡터 검색", "청크").stream().anyMatch(concept::contains);
             default -> true;
         };
     }
@@ -1391,6 +1554,8 @@ public class RagService {
             case "소프트웨어공학" -> List.of("요구사항 분석", "소프트웨어 설계", "테스트", "UML", "애자일");
             case "컴퓨터구조" -> List.of("CPU", "캐시", "명령어", "파이프라인", "메모리 계층");
             case "프로그래밍" -> List.of("클래스", "객체", "상속", "함수", "예외 처리");
+            case "데이터분석" -> List.of("Pandas", "DataFrame", "Series", "NumPy", "데이터 전처리");
+            case "RAG 시스템" -> List.of("RAG", "임베딩", "pgvector", "GPT Vision", "로컬 LLM");
             default -> List.of("컴퓨터공학", "핵심 개념", "시스템 구조");
         };
     }
@@ -1421,7 +1586,7 @@ public class RagService {
         for (Map.Entry<String, List<String>> entry : buildComputerScienceConceptKeywords().entrySet()) {
             int score = 0;
             for (String keyword : entry.getValue()) {
-                score += countOccurrences(lower, keyword.toLowerCase(Locale.ROOT));
+                score += countKeywordHits(lower, keyword.toLowerCase(Locale.ROOT));
             }
             if (score > 0) {
                 scores.put(entry.getKey(), score);
@@ -1440,6 +1605,8 @@ public class RagService {
         keywords.put("소프트웨어공학", List.of("software engineering", "requirements", "uml", "design pattern", "testing", "agile", "maintenance", "소프트웨어공학", "요구사항", "설계 패턴", "테스트", "애자일", "유지보수"));
         keywords.put("컴퓨터구조", List.of("computer architecture", "cpu", "cache", "instruction", "pipeline", "register", "memory hierarchy", "컴퓨터구조", "캐시", "명령어", "파이프라인", "레지스터", "메모리 계층"));
         keywords.put("프로그래밍", List.of("programming", "class", "object", "inheritance", "function", "variable", "exception", "프로그래밍", "클래스", "객체", "상속", "함수", "변수", "예외"));
+        keywords.put("데이터분석", List.of("data analysis", "data science", "pandas", "numpy", "dataframe", "series", "matplotlib", "seaborn", "데이터 분석", "데이터분석", "판다스", "넘파이", "데이터프레임", "시리즈", "전처리", "시각화"));
+        keywords.put("RAG 시스템", List.of("rag", "retrieval augmented generation", "embedding", "vector database", "pgvector", "gpt vision", "local llm", "ollama", "chunk", "벡터 db", "벡터DB", "임베딩", "벡터 검색", "청크", "로컬 llm", "표/이미지", "시각 자료"));
         return keywords;
     }
 
@@ -1494,7 +1661,34 @@ public class RagService {
         keywords.put("함수", List.of("function", "method", "함수", "메서드"));
         keywords.put("변수", List.of("variable", "변수"));
         keywords.put("예외 처리", List.of("exception", "예외", "예외 처리"));
+        keywords.put("Pandas", List.of("pandas", "판다스"));
+        keywords.put("DataFrame", List.of("dataframe", "data frame", "데이터프레임"));
+        keywords.put("Series", List.of("series", "시리즈"));
+        keywords.put("NumPy", List.of("numpy", "넘파이"));
+        keywords.put("데이터 전처리", List.of("preprocessing", "cleaning", "결측치", "전처리", "정제"));
+        keywords.put("데이터 시각화", List.of("visualization", "matplotlib", "seaborn", "plot", "시각화", "그래프"));
+        keywords.put("RAG", List.of("rag", "retrieval augmented generation", "검색 증강 생성"));
+        keywords.put("임베딩", List.of("embedding", "임베딩", "벡터화"));
+        keywords.put("pgvector", List.of("pgvector", "vector database", "벡터 db", "벡터DB", "벡터 데이터베이스"));
+        keywords.put("GPT Vision", List.of("gpt vision", "vision", "시각 자료", "이미지 분석", "표/이미지"));
+        keywords.put("로컬 LLM", List.of("local llm", "ollama", "로컬 llm", "로컬 LLM"));
         return keywords;
+    }
+
+    private int countKeywordHits(String lowerText, String lowerKeyword) {
+        if (lowerText == null || lowerKeyword == null || lowerKeyword.isBlank()) {
+            return 0;
+        }
+        if (lowerKeyword.matches("[a-z0-9+#./-]{1,3}")) {
+            Matcher matcher = Pattern.compile("(?<![a-z0-9])" + Pattern.quote(lowerKeyword) + "(?![a-z0-9])")
+                    .matcher(lowerText);
+            int count = 0;
+            while (matcher.find()) {
+                count++;
+            }
+            return count;
+        }
+        return countOccurrences(lowerText, lowerKeyword);
     }
 
     private int countComputerScienceKeywordHits(String lowerText) {
