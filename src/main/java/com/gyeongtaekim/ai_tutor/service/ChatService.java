@@ -37,8 +37,14 @@ public class ChatService {
     private final UserRepository userRepository;
 
     public ChatSessionResponse createSession(ChatSessionCreateRequest request) {
-        User user = userRepository.findById(request.getUserId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+        return createSession(request, null);
+    }
+
+    public ChatSessionResponse createSession(ChatSessionCreateRequest request, User currentUser) {
+        User user = currentUser != null
+                ? currentUser
+                : userRepository.findById(request.getUserId())
+                        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
 
         String title = request.getTitle() == null || request.getTitle().isBlank()
                 ? "New Chat Session"
@@ -49,24 +55,43 @@ public class ChatService {
     }
 
     public List<ChatSessionResponse> getSessions(Long userId) {
+        return getSessions(userId, null);
+    }
+
+    public List<ChatSessionResponse> getSessions(Long userId, User currentUser) {
+        if (currentUser != null && !currentUser.getId().equals(userId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "User id does not match authenticated user");
+        }
         return chatSessionRepository.findByUserIdOrderByUpdatedAtDesc(userId).stream()
                 .map(ChatSessionResponse::new)
                 .toList();
     }
 
     public ChatSessionResponse getSession(Long sessionId) {
-        return new ChatSessionResponse(findSession(sessionId));
+        return getSession(sessionId, null);
+    }
+
+    public ChatSessionResponse getSession(Long sessionId, User currentUser) {
+        return new ChatSessionResponse(findSession(sessionId, currentUser));
     }
 
     public List<ChatMessageResponse> getMessages(Long sessionId) {
-        findSession(sessionId);
+        return getMessages(sessionId, null);
+    }
+
+    public List<ChatMessageResponse> getMessages(Long sessionId, User currentUser) {
+        findSession(sessionId, currentUser);
         return chatMessageRepository.findBySessionIdOrderByCreatedAtAsc(sessionId).stream()
                 .map(ChatMessageResponse::new)
                 .toList();
     }
 
     public ChatMessageResponse addMessage(Long sessionId, ChatMessageCreateRequest request) {
-        ChatSession session = findSession(sessionId);
+        return addMessage(sessionId, request, null);
+    }
+
+    public ChatMessageResponse addMessage(Long sessionId, ChatMessageCreateRequest request, User currentUser) {
+        ChatSession session = findSession(sessionId, currentUser);
         ChatMessage.MessageRole role = ChatMessage.MessageRole.valueOf(request.getRole().toUpperCase(Locale.ROOT));
         ChatMessage message = new ChatMessage(session, role, request.getContent(), request.getSourceReferences());
         session.touch();
@@ -75,38 +100,59 @@ public class ChatService {
     }
 
     public ChatSessionResponse closeSession(Long sessionId) {
-        ChatSession session = findSession(sessionId);
+        return closeSession(sessionId, null);
+    }
+
+    public ChatSessionResponse closeSession(Long sessionId, User currentUser) {
+        ChatSession session = findSession(sessionId, currentUser);
         session.close();
         return new ChatSessionResponse(chatSessionRepository.save(session));
     }
 
     public ChatSessionResponse updateSessionTitle(Long sessionId, ChatSessionTitleUpdateRequest request) {
+        return updateSessionTitle(sessionId, request, null);
+    }
+
+    public ChatSessionResponse updateSessionTitle(Long sessionId, ChatSessionTitleUpdateRequest request, User currentUser) {
         if (request.getTitle() == null || request.getTitle().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Session title is required");
         }
 
-        ChatSession session = findSession(sessionId);
+        ChatSession session = findSession(sessionId, currentUser);
         session.updateTitle(request.getTitle().trim());
         return new ChatSessionResponse(chatSessionRepository.save(session));
     }
 
     public List<RagDocumentSummaryResponse> getSessionDocuments(Long sessionId) {
-        findSession(sessionId);
+        return getSessionDocuments(sessionId, null);
+    }
+
+    public List<RagDocumentSummaryResponse> getSessionDocuments(Long sessionId, User currentUser) {
+        findSession(sessionId, currentUser);
         List<Long> documentIds = chatSessionDocumentRepository.findBySessionIdOrderByIdAsc(sessionId).stream()
                 .map(ChatSessionDocument::getDocumentId)
                 .toList();
 
         return documentIds.stream()
-                .map(ragDocumentRepository::findById)
+                .map(documentId -> currentUser == null
+                        ? ragDocumentRepository.findById(documentId)
+                        : ragDocumentRepository.findByIdAndUserId(documentId, currentUser.getId()))
                 .flatMap(java.util.Optional::stream)
                 .map(RagDocumentSummaryResponse::new)
                 .toList();
     }
 
     public RagDocumentSummaryResponse attachSessionDocument(Long sessionId, Long documentId) {
-        ChatSession session = findSession(sessionId);
-        var document = ragDocumentRepository.findById(documentId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document not found"));
+        return attachSessionDocument(sessionId, documentId, null);
+    }
+
+    public RagDocumentSummaryResponse attachSessionDocument(Long sessionId, Long documentId, User currentUser) {
+        ChatSession session = findSession(sessionId, currentUser);
+        var document = currentUser == null
+                ? ragDocumentRepository.findById(documentId)
+                        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document not found"))
+                : ragDocumentRepository.findByIdAndUserId(documentId, currentUser.getId())
+                        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document not found"));
         if (!chatSessionDocumentRepository.existsBySessionIdAndDocumentId(sessionId, documentId)) {
             chatSessionDocumentRepository.save(new ChatSessionDocument(session, documentId));
         }
@@ -115,7 +161,12 @@ public class ChatService {
 
     @Transactional
     public void deleteSession(Long sessionId) {
-        findSession(sessionId);
+        deleteSession(sessionId, null);
+    }
+
+    @Transactional
+    public void deleteSession(Long sessionId, User currentUser) {
+        findSession(sessionId, currentUser);
         chatMessageRepository.deleteAllBySessionId(sessionId);
         chatSessionDocumentRepository.deleteAllBySessionId(sessionId);
         sessionQuizRepository.deleteAllBySessionId(sessionId);
@@ -125,6 +176,14 @@ public class ChatService {
     private ChatSession findSession(Long sessionId) {
         return chatSessionRepository.findById(sessionId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Chat session not found"));
+    }
+
+    private ChatSession findSession(Long sessionId, User currentUser) {
+        ChatSession session = findSession(sessionId);
+        if (currentUser != null && !currentUser.getId().equals(session.getUser().getId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Chat session does not belong to authenticated user");
+        }
+        return session;
     }
 
     private ChatSession.SessionType parseSessionType(String rawType) {

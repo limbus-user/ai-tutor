@@ -57,7 +57,13 @@ public class ReviewService {
     }
 
     public ReviewQueueResponse completeReview(Long reviewId) {
-        ReviewQueue queue = reviewQueueRepository.findById(reviewId)
+        return completeReview(reviewId, null);
+    }
+
+    public ReviewQueueResponse completeReview(Long reviewId, User currentUser) {
+        ReviewQueue queue = (currentUser == null
+                ? reviewQueueRepository.findById(reviewId)
+                : reviewQueueRepository.findByIdAndUserId(reviewId, currentUser.getId()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Review item not found"));
         queue.complete();
         queue.getWrongAnswerNote().markReviewed();

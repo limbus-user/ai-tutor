@@ -1,0 +1,401 @@
+﻿question_no,choice_no,choice_text,is_correct
+1,1,메시지는 이해하기 쉬워야 한다.,False
+1,2,오류로부터 회복을 위한 구체적인 설명이 제공되어야 한다.,False
+1,3,오류로 인해 발생 될 수 있는 부정적인 내용을 적극적으로 사용자들에게 알려야 한다.,False
+1,4,소리나 색의 사용을 줄이고 텍스트로만 전달하도록 한다.,True
+2,1,공정과 도구보다 개인과의 상호작용을 더 가치 있게 여긴다.,False
+2,2,동작하는 소프트웨어보다는 포괄적인 문서를 가치 있게 여긴다.,True
+2,3,계약 협상보다는 고객과의 협력을 가치 있게 여긴다.,False
+2,4,계획을 따르기보다 변화에 대응하기를 가치 있게 여긴다.,False
+3,1,소프트웨어가 무엇을 해야하는가를 추적하여 요구사항 명세를 작성하는 작업이다.,False
+3,2,사용자의 요구를 추출하여 목표를 정하고 어떤 방식으로 해결할 것인지 결정하는 단계이다.,False
+3,3,소프트웨어 시스템이 사용되는 동안 발견되는 오류를 정리하는 단계이다.,True
+3,4,소프트웨어 개발의 출발점이면서 실질적인 첫 번째 단계이다.,False
+4,1,Abstraction,False
+4,2,Polymorphism,False
+4,3,Encapsulation,False
+4,4,Inheritance,True
+5,1,하향식 설계에서는 통합 검사 시 인터페이스가 이미 정의되어 있어 통합이 간단하다.,False
+5,2,하향식 설계에서 레벨이 낮은 데이터 구조의 세부 사항은 설계초기 단계에서 필요하다.,False
+5,3,상향식 설계는 최하위 수준에서 각각의 모듈들을 설계하고 이러한 모듈이 완성되면 이들을 결합하여 검사한다.,False
+5,4,상향식 설계에서는 인터페이스가 이미 성립되어 있지 않더라도 기능 추가가 쉽다.,True
+6,1,Process : 원,False
+6,2,Data Flow : 화살표,False
+6,3,Data Store : 삼각형,True
+6,4,Terminator : 사각형,False
+7,1,모델은 개발 대상을 추상화하고 기호나 그림 등으로 시각적으로 표현한다.,False
+7,2,모델을 통해 소프트웨어에 대한 이해도를 향상시킬 수 있다.,False
+7,3,모델을 통해 이해 당사자 간의 의사소통이 향상된다.,False
+7,4,모델을 통해 향후 개발될 시스템의 유추는 불가능하다.,True
+8,1,JAVA,False
+8,2,C,False
+8,3,UML,True
+8,4,Python,False
+9,1,스토리보드(Storyboard),False
+9,2,목업(Mockup),True
+9,3,프로토타입(Prototype) X,False
+9,4,유스케이스(Usecase),False
+10,1,"스크럼 마스터(Scrum Master)는 스크럼 프로세스를 따르고, 팀이 스크럼을 효과적으로 활용할 수 있도록 보장하는 역할 등을 맡는다.",False
+10,2,"제품 백로그(Product Backlog)는 스크럼 팀이 해결해야 하는 목록으로 소프트웨어 요구사항, 아키텍처 정의 등이 포함될 수 있다.",False
+10,3,스프린트(Sprint)는 하나의 완성된 최종 결과물을 만들기 위한 주기로 3달 이상의 장기간으로 결정된다.,True
+10,4,속도(Velocity)는 한 번의 스프린트에서 한 팀이 어느 정도의 제품 백로그를 감당할 수 있는지에 대한 추정치로 볼 수 있다.,False
+11,1,컴포넌트 다이어그램,False
+11,2,배치 다이어그램,False
+11,3,순차 다이어그램,True
+11,4,패키지 다이어그램,False
+12,1,5개월,False
+12,2,10개월,False
+12,3,15개월,False
+12,4,20개월,True
+13,1,단일 책임원칙 : 하나의 클래스만 변경 가능 해야한다.,False
+13,2,개방-폐쇄의 원칙 : 클래스는 확장에 대해 열려 있어야 하며 변경에 대해 닫혀 있어야 한다.,True
+13,3,리스코프 교체의 원칙 : 여러 개의 책임을 가진 클래스는 하나의 책임을 가진 클래스로 대체되어야 한다.,False
+13,4,의존관계 역전의 원칙 : 클라이언트는 자신이 사용하는 메소드와 의존관계를 갖지 않도록 해야 한다.,False
+14,1,컴퍼지트(Composite),False
+14,2,어댑터(Adapter),False
+14,3,추상 팩토리(Abstract Factory) ,True
+14,4,옵서버(Observer),False
+15,1,㉮ → ㉯ → ㉰ → ㉱ → ㉲,True
+15,2,㉲ → ㉮ → ㉯ → ㉱ → ㉰,False
+15,3,㉮ → ㉲ → ㉯ → ㉱ → ㉰,False
+15,4,㉮ → ㉯ → ㉰ → ㉲ → ㉱,False
+16,1,심미성을 사용성보다 우선하여 설계해야 한다.,True
+16,2,효율성을 높이게 설계해야 한다.,False
+16,3,발생하는 오류를 쉽게 수정할 수 있어야 한다.,False
+16,4,사용자에게 피드백을 제공해야 한다.,False
+17,1,모듈 분해,False
+17,2,디자인 패턴,True
+17,3,연관 관계,False
+17,4,클래스 도출,False
+18,1,Wirfs-Block Method,False
+18,2,Rumbaugh Method,True
+18,3,Booch Method,False
+18,4,Jacobson Method,False
+19,1,EAI,False
+19,2,FEP,True
+19,3,GPL,False
+19,4,Duplexing,False
+20,1,Method,False
+20,2,Class,True
+20,3,Field,False
+20,4,Message 氠瑢 2과목 : 소프트웨어 개발,False
+21,1,"추상화 : 하위 클래스/메소드/함수를 통해 애플리케이션의 특성을 간략하게 나타내고, 상세 내용은 상위 클래스/메소드/함수에서 구현한다.",True
+21,2,의존성 : 다른 모듈에 미치는 영향을 최소화하도록 작성한다.,False
+21,3,가독성 : 누구든지 읽기 쉽게 코드를 작성한다.,False
+21,4,중복성 : 중복을 최소화 할 수 있는 코드를 작성한다.,False
+22,1,테스트 스텁(Test Stub),False
+22,2,테스트 드라이버(Test Driver),True
+22,3,테스트 슈트(Test Suites),False
+22,4,테스트 케이스(Test Case),False
+23,1,"㉠, ㉡",False
+23,2,"㉡, ㉢",False
+23,3,㉣,True
+23,4,"㉠, ㉡, ㉢, ㉣",False
+24,1,오류의 파급 효과를 최소화한다.,False
+24,2,기능의 분리가 가능하여 인터페이스가 복잡하다.,True
+24,3,모듈의 재사용 가능으로 개발과 유지보수가 용이하다.,False
+24,4,프로그램의 효율적인 관리가 가능하다.,False
+25,1,개발에 따른 산출물 관리,False
+25,2,소요인력은 최대화하되 정책 결정은 신속하게 처리,False
+25,3,주어진 기간은 연장하되 최소의 비용으로 시스템을 개발,False
+25,4,주어진 기간 내에 최소의 비용으로 사용자를 만족시키는 시스템을 개발,True
+26,1,의제를 제한한다.,False
+26,2,논쟁과 반박을 제한한다.,False
+26,3,문제 영역을 명확히 표현한다.,False
+26,4,참가자의 수를 제한하지 않는다.,True
+27,1,Analysis,False
+27,2,Migration,True
+27,3,Restructuring,False
+27,4,Reverse Engineering,False
+28,1,개발 정보시스템의 특성,False
+28,2,사용자의 요구사항,False
+28,3,컴파일러의 가용성,False
+28,4,컴파일러의 독창성,True
+29,1,패키징은 개발자 중심으로 진행한다.,True
+29,2,"신규 및 변경 개발소스를 식별하고, 이를 모듈화하여 상용제품으로 패키징한다.",False
+29,3,고객의 편의성을 위해 매뉴얼 및 버전관리를 지속적으로 한다.,False
+29,4,범용 환경에서 사용이 가능하도록 일반적인 배포 형태로 패키징이 진행된다.,False
+30,1,트리,True
+30,2,리스트,False
+30,3,스택,False
+30,4,데크,False
+31,1,Title Code,False
+31,2,Source Code,False
+31,3,Object Code,False
+31,4,Alien Code,True
+32,1,생산성 증가,False
+32,2,프로젝트 문서 공유,False
+32,3,소프트웨어 품질 향상,False
+32,4,새로운 개발 방법론 도입 용이,True
+33,1,AJTML,True
+33,2,JSON,False
+33,3,XML,False
+33,4,YAML,False
+34,1,논리의 기술에 중점을 두고 도형을 이용한 표현 방법이다.,False
+34,2,이해하기 쉽고 코드 변환이 용이하다.,False
+34,3,화살표나 GOTO를 사용하여 이해하기 쉽다.,True
+34,4,"연속, 선택, 반복 등의 제어 논리 구조를 표현한다.",False
+35,1,B D C A,True
+35,2,A B C D,False
+35,3,B A C D,False
+35,4,A B D C,False
+36,1,Selection Sort,False
+36,2,Bubble Sort,False
+36,3,Insert Sort,False
+36,4,Quick Sort,True
+37,1,"㉠, ㉡",True
+37,2,"㉠, ㉣",False
+37,3,"㉡, ㉤",False
+37,4,"㉢, ㉥",False
+38,1,소프트웨어 품질 평가를 위한 소프트웨어 품질평가 통합모델 표준이다.,False
+38,2,System and Software Quality Requirements and Evaluation으로 줄여서 SQuaRE라고도 한다.,False
+38,3,"ISO/IEC 2501n에서는 소프트웨어의 내부 측정, 외부측정, 사용품질 측정, 품질 측정 요소 등을 다룬다.",True
+38,4,기존 소프트웨어 품질 평가 모델과 소프트웨어 평가 절차 모델인 ISO/IEC 9126과 ISO/IEC 14598을 통합하였다.,False
+39,1,프로그램을 수행시켜보는 것 대신에 읽어보고 눈으로 확인하는 방법으로 볼 수 있다.,False
+39,2,코드 품질 향상 기법 중 하나이다.,False
+39,3,동적 테스트 시에만 활용하는 기법이다.,True
+39,4,"결함과 함께 코딩 표준 준수 여부, 효율성 등의 다른 품질 이슈를 검사하기도 한다.",False
+40,1,"Critical Path Method ,",False
+40,2,Risk Analysis,True
+40,3,Work Breakdown Structure,False
+40,4,Waterfall Model 氠瑢 3과목 : 데이터베이스 구축,False
+41,1,스키마의 평가 및 정제,True
+41,2,응답 시간,False
+41,3,저장 공간의 효율화,False
+41,4,트랜잭션 처리량,False
+42,1,테이블의 행을 삭제할 때 사용한다.,False
+42,2,WHERE 조건절이 없는 DELETE 명령을 수행하면 DROP TABLE 명령을 수행했을 때와 동일한 효과를 얻을 수 있다.,True
+42,3,SQL을 사용 용도에 따라 분류할 경우 DML에 해당한다.,False
+42,4,기본 사용 형식은 “DELETE FROM 테이블 [WHERE 조건];” 이다.,False
+43,1,제5정규형,True
+43,2,제4정규형,False
+43,3,제3정규형,False
+43,4,제1정규형,False
+44,1,[이미지 보기],False
+44,2,[이미지 보기],False
+44,3,[이미지 보기],True
+44,4,[이미지 보기],False
+45,1,필드키,False
+45,2,슈퍼키,False
+45,3,외래키,True
+45,4,후보키,False
+46,1,∃,False
+46,2,∈,False
+46,3,∀,True
+46,4,⊂,False
+47,1,"Degree : 4, Cardinality : 3",True
+47,2,"Degree : 3, Cardinality : 4",False
+47,3,"Degree : 3, Cardinality : 12",False
+47,4,"Degree : 12, Cardinality : 3",False
+48,1,뷰 위에 또 다른 뷰를 정의할 수 있다.,False
+48,2,DBA는 보안성 측면에서 뷰를 활용할 수 있다.,False
+48,3,사용자가 필요한 정보를 요구에 맞게 가공하여 뷰로 만들 수 있다.,False
+48,4,"SQL을 사용하면 뷰에 대한 삽입, 갱신, 삭제 연산 시 제약 사항이 없다.",True
+49,1,SELECT 학생 FROM 이름 WHERE 학과='교육';,False
+49,2,SELECT 이름 FROM 학생 WHERE 학과='교육';,True
+49,3,SELECT 교육 FROM 학과 WHERE 이름='학생';,False
+49,4,SELECT 학과 FROM 학생 WHERE 이름='교육';,False
+50,1,1NF → 2NF,False
+50,2,2NF → 3NF,True
+50,3,3NF → BCNF,False
+50,4,BCNF → 4NF,False
+51,1,속성 타입 변경,True
+51,2,속성의 NOT NULL 여부 지정,False
+51,3,기본키를 구성하는 속성 지정,False
+51,4,CHECK 제약조건의 정의,False
+52,1,REVOKE 키워드를 사용하여 열 이름을 다시 부여할 수 있다.,True
+52,2,"데이터 정의어는 기본 테이블, 뷰 테이블, 또는 인덱스 등을 생성, 변경, 제거하는데 사용되는 명령어이다.",False
+52,3,DISTINCT를 활용하여 중복 값을 제거할 수 있다.,False
+52,4,JOIN을 통해 여러 테이블의 레코드를 조합하여 표현할 수 있다.,False
+53,1,1,False
+53,2,3,False
+53,3,4,False
+53,4,5,True
+54,1,점수 ＞= 90 AND 점수 ＜= 95,True
+54,2,점수 ＞ 90 AND 점수 ＜ 95,False
+54,3,점수 ＞ 90 AND 점수 ＜= 95,False
+54,4,점수 ＞= 90 AND 점수 ＜ 95,False
+55,1,철회(Aborted),True
+55,2,부분 완료(Partially Committed),False
+55,3,완료(Commit),False
+55,4,실패(Fail),False
+56,1,ROLLBACK : 데이터의 보안과 무결성을 정의한다.,False
+56,2,COMMIT : 데이터베이스 사용자의 사용 권한을 취소한다.,False
+56,3,GRANT : 데이터베이스 사용자의 사용 권한을 부여한다.,True
+56,4,REVOKE : 데이터베이스 조작 작업이 비정상적으로 종료되었을 때 원래 상태로 복구한다.,False
+57,1,[이미지 보기],False
+57,2,[이미지 보기],False
+57,3,[이미지 보기],False
+57,4,[이미지 보기],True
+58,1,분산 데이터베이스는 논리적으로는 하나의 시스템에 속하지만 물리적으로는 여러 개의 컴퓨터 사이트에 분산되어 있다.,False
+58,2,"위치 투명성, 중복 투명성, 병행 투명성, 장애 투명성을 목표로 한다.",False
+58,3,"데이터베이스의 설계가 비교적 어렵고, 개발 비용과 처리 비용이 증가한다는 단점이 있다.",False
+58,4,"분산 데이터베이스 시스템의 주요 구성 요소는 분산 처리기, P2P 시스템, 단일 데이터베이스 등이 있다.",True
+59,1,V_1만 삭제된다.,False
+59,2,V_2만 삭제된다.,False
+59,3,V_1과 V_2 모두 삭제된다.,True
+59,4,V_1과 V_2 모두 삭제되지 않는다.,False
+60,1,시스템 활용도 최대화,False
+60,2,사용자에 대한 응답시간 최소화,False
+60,3,데이터베이스 공유 최소화,True
+60,4,데이터베이스 일관성 유지 氠瑢 4과목 : 프로그래밍 언어 활용,False
+61,1,IPv6의 패킷 헤더는 32 octet의 고정된 길이를 가진다.,True
+61,2,IPv6는 주소 자동설정(Auto Configuration) 기능을 통해 손쉽게 이용자의 단말을 네트워크에 접속시킬 수 있다.,False
+61,3,IPv4는 호스트 주소를 자동으로 설정하며 유니캐스트(Unicast)를 지원한다.,False
+61,4,IPv4는 클래스별로 네트워크와 호스트 주소의 길이가 다르다.,False
+62,1,"7, 5",False
+62,2,"8, 5",False
+62,3,"8, 9",True
+62,4,"7, 9",False
+63,1,HTTP,True
+63,2,HDLC,False
+63,3,PPP,False
+63,4,LLC,False
+64,1,||,True
+64,2,&&,False
+64,3,**,False
+64,4,!=,False
+65,1,표시방법은 8비트씩 4부분의 10진수로 표시한다.,True
+65,2,2128개의 주소를 표현할 수 있다.,False
+65,3,"등급별, 서비스별로 패킷을 구분할 수 있어 품질보장이 용이하다.",False
+65,4,확장기능을 통해 보안기능을 제공한다.,False
+66,1,문법 오류로 인해 발생한 것,True
+66,2,오동작이나 결과에 악영향을 미칠 수 있는 실행 시간 동안에 발생한 오류,False
+66,3,배열의 인덱스가 그 범위를 넘어서는 경우 발생하는 오류,False
+66,4,존재하지 않는 파일을 읽으려고 하는 경우에 발생하는 오류,False
+67,1,ECP(Error Checking Protocol),False
+67,2,ARP(Address Resolution Protocol),False
+67,3,ICMP(Internet Control Message Protocol),True
+67,4,PPP(Point-to-Point Protocol),False
+68,1,응집도는 낮게 결합도는 높게 설계한다.,False
+68,2,응집도는 높게 결합도는 낮게 설계한다.,True
+68,3,양쪽 모두 낮게 설계한다.,False
+68,4,양쪽 모두 높게 설계한다.,False
+69,1,Dekker Algorithm,False
+69,2,Lamport Algorithm,False
+69,3,Peterson Algorithm,False
+69,4,Semaphore,True
+70,1,다른 것들과 구별될 수 있는 독립적인 기능을 가진 단위(Unit)이다.,False
+70,2,독립적인 컴파일이 가능하다.,False
+70,3,유일한 이름을 가져야 한다.,False
+70,4,다른 모듈에서의 접근이 불가능해야 한다.,True
+71,1,3KB,True
+71,2,23KB,False
+71,3,64KB,False
+71,4,67KB,False
+72,1,i = 0,False
+72,2,i = 1,False
+72,3,i = 3,False
+72,4,i = 4,True
+73,1,BCDABCA,False
+73,2,BCDABCC,True
+73,3,CDDACCC,False
+73,4,CDDACCA,False
+74,1,Ant,False
+74,2,Kerberos,True
+74,3,Maven,False
+74,4,Gradle,False
+75,1,"1, 2, 0",False
+75,2,"2, 4, 3",False
+75,3,"1, 4, 2",False
+75,4,"4, 1, 3",True
+76,1,E,False
+76,2,V,False
+76,3,R ð,True
+76,4,O,False
+77,1,[이미지 보기],True
+77,2,[이미지 보기],False
+77,3,[이미지 보기],False
+77,4,[이미지 보기],False
+78,1,0,False
+78,2,1,True
+78,3,3,False
+78,4,5,False
+79,1,[이미지 보기],False
+79,2,[이미지 보기],True
+79,3,[이미지 보기],False
+79,4,[이미지 보기],False
+80,1,사용자 명령을 해석하고 커널로 전달하는 기능을 제공한다.,False
+80,2,반복적인 명령 프로그램을 만드는 프로그래밍 기능을 제공한다.,False
+80,3,쉘 프로그램 실행을 위해 프로세스와 메모리를 관리한다.,True
+80,4,초기화 파일을 이용해 사용자 환경을 설정하는 기능을 제공한다. 氠瑢 5과목 : 정보시스템 구축관리,False
+81,1,소프트웨어 개발 프로세스를 위험 관리(Risk Management) 측면에서 본 모델이다.,False
+81,2,위험 분석(Risk Analysis)은 반복적인 개발 진행 후 주기의 마지막 단계에서 최종적으로 한 번 수행해야 한다.,True
+81,3,시스템을 여러 부분으로 나누어 여러 번의 개발 주기를 거치면서 시스템이 완성된다.,False
+81,4,요구사항이나 아키텍처를 이해하기 어렵다거나 중심이 되는 기술에 문제가 있는 경우 적합한 모델이다.,False
+82,1,고가용성 솔루션(HACMP),True
+82,2,점대점 연결 방식(Point-to-Point Mode),False
+82,3,스턱스넷(Stuxnet),False
+82,4,루팅(Rooting),False
+83,1,Parsing,False
+83,2,LAN Tapping,False
+83,3,Switch Jamming,True
+83,4,FTP Flooding,False
+84,1,DAS,True
+84,2,NAS,False
+84,3,BSA,False
+84,4,NFC,False
+85,1,무결성 검사,False
+85,2,응용 프로그램의 보안 설정 및 패치(Patch) 적용,False
+85,3,중단 프로세스 및 닫힌 포트 위주로 확인,True
+85,4,불필요한 서비스 및 악성 프로그램의 확인과 제거,False
+86,1,요구 분석 및 설계단계를 거치지 않으며 항상 통합 테스트를 중심으로 V 형태를 이룬다.,True
+86,2,Perry에 의해 제안되었으며 세부적인 테스트 과정으로 구성되어 신뢰도 높은 시스템을 개발하는데 효과적이다.,False
+86,3,개발 작업과 검증 작업 사이의 관계를 명확히 드러내 놓은 폭포수 모델의 변형이라고 볼 수 있다.,False
+86,4,폭포수 모델이 산출물 중심이라면 V 모델은 작업과 결과의 검증에 초점을 둔다.,False
+87,1,블루버그(BlueBug) - 블루투스의 취약점을 활용하여 장비의 파일에 접근하는 공격으로 OPP를 사용하여 정보를 열람,False
+87,2,블루스나프(BlueSnarf) - 블루투스를 이용해 스팸처럼 명함을 익명으로 퍼뜨리는 것,False
+87,3,블루프린팅(BluePrinting) - 블루투스 공격 장치의 검색 활동을 의미,True
+87,4,블루재킹(BlueJacking) - 블루투스 장비사이의 취약한 연결 관리를 악용한 공격,False
+88,1,Ping of Death 공격은 정상 크기보다 큰 ICMP 패킷을 작은 조각(Fragment)으로 쪼개어 공격 대상이 조각화 된 패킷을 처리하게 만드는 공격 방법이다.,False
+88,2,Smurf 공격은 멀티캐스트(Multicast)를 활용하여 공격 대상이 네트워크의 임의의 시스템에 패킷을 보내게 만드는 공격이다.,True
+88,3,SYN Flooding은 존재하지 않는 클라이언트가 서버별로 한정된 접속 가능 공간에 접속한 것처럼 속여 다른 사용자가 서비스를 이용하지 못하게 하는 것이다.,False
+88,4,Land 공격은 패킷 전송 시 출발지 IP주소와 목적지 IP주소 값을 똑같이 만들어서 공격 대상에게 보내는 공격 방법이다.,False
+89,1,Apache,False
+89,2,Hadoop,False
+89,3,Honeypot,True
+89,4,MapReduce,False
+90,1,StackGuard,False
+90,2,Docker,True
+90,3,Cipher Container,False
+90,4,Scytale,False
+91,1,프로젝트를 이루는 소작업 별로 언제 시작되고 언제 끝나야 하는지를 한 눈에 볼 수 있도록 도와준다.,False
+91,2,자원 배치 계획에 유용하게 사용된다.,False
+91,3,CPM 네트워크로부터 만드는 것이 가능하다.,False
+91,4,수평 막대의 길이는 각 작업(Task)에 필요한 인원수를 나타낸다.,True
+92,1,Li-fi,False
+92,2,Scrapy,True
+92,3,CrawlCat,False
+92,4,SBAS,False
+93,1,SQL 삽입 : 사용자의 입력 값 등 외부 입력 값이 SQL 쿼리에 삽입되어 공격,False
+93,2,크로스사이트 스크립트 : 검증되지 않은 외부 입력 값에 의해 브라우저에서 악의적인 코드가 실행,False
+93,3,운영체제 명령어 삽입 : 운영체제 명령어 파라미터 입력 값이 적절한 사전검증을 거치지 않고 사용되어 공격자가 운영체제 명령어를 조작,False
+93,4,자원 삽입 : 사용자가 내부 입력 값을 통해 시스템 내에 사용이 불가능한 자원을 지속적으로 입력함으로써 시스템에 과부하 발생,True
+94,1,보안에 취약,True
+94,2,대용량 볼륨에 효율적,False
+94,3,자동 압축 및 안정성,False
+94,4,저용량 볼륨에서의 속도 저하,False
+95,1,8,False
+95,2,24,False
+95,3,64,True
+95,4,132,False
+96,1,022,True
+96,2,666,False
+96,3,777,False
+96,4,755,False
+97,1,tapping,False
+97,2,xtslog,False
+97,3,linuxer,False
+97,4,wtmp,True
+98,1,낙관치,False
+98,2,기대치,False
+98,3,비관치,False
+98,4,모형치,True
+99,1,PLCP(Packet Level Control Processor),False
+99,2,Traffic Distributor,False
+99,3,Packet Tree,False
+99,4,DPI(Deep Packet Inspection),True
+100,1,프로젝트 수행 시 예상되는 변화를 배제하고 신속히 진행하여야 한다.,True
+100,2,"프로젝트에 최적화된 개발 방법론을 적용하기 위해 절차, 산출물 등을 적절히 변경하는 활동이다.",False
+100,3,관리 측면에서의 목적 중 하나는 최단기간에 안정적인 프로젝트 진행을 위한 사전 위험을 식별하고 제거하는 것이다.,False
+100,4,기술적 측면에서의 목적 중 하나는 프로젝트에 최적화된 기술 요소를 도입하여 프로젝트 특성에 맞는 최적의 기법과 도구를 사용하는 것이다.,False

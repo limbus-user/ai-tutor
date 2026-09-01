@@ -42,6 +42,10 @@ public class User {
         this.role = Role.ADMIN;
     }
 
+    public void changePassword(String password) {
+        this.password = password;
+    }
+
     public enum Role {
         USER, ADMIN
     }

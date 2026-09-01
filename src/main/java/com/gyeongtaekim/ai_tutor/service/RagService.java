@@ -1,8 +1,10 @@
 package com.gyeongtaekim.ai_tutor.service;
 
+import com.gyeongtaekim.ai_tutor.domain.ChatSession;
 import com.gyeongtaekim.ai_tutor.domain.DocumentChunk;
 import com.gyeongtaekim.ai_tutor.domain.RagDocument;
 import com.gyeongtaekim.ai_tutor.domain.SessionQuiz;
+import com.gyeongtaekim.ai_tutor.domain.User;
 import com.gyeongtaekim.ai_tutor.dto.RagDocumentSummaryResponse;
 import com.gyeongtaekim.ai_tutor.dto.RagDocumentUploadResponse;
 import com.gyeongtaekim.ai_tutor.dto.RagGeneratedQuestionResponse;
@@ -10,7 +12,7 @@ import com.gyeongtaekim.ai_tutor.dto.RagGeneratedQuestionsResponse;
 import com.gyeongtaekim.ai_tutor.dto.RagQueryResponse;
 import com.gyeongtaekim.ai_tutor.repository.DocumentChunkRepository;
 import com.gyeongtaekim.ai_tutor.repository.ChatSessionDocumentRepository;
-import com.gyeongtaekim.ai_tutor.repository.PgVectorChunkSearchRepository;
+import com.gyeongtaekim.ai_tutor.repository.ChatSessionRepository;
 import com.gyeongtaekim.ai_tutor.repository.RagDocumentRepository;
 import com.gyeongtaekim.ai_tutor.repository.SessionQuizRepository;
 import dev.langchain4j.data.document.Document;
@@ -20,9 +22,6 @@ import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
-import dev.langchain4j.store.embedding.EmbeddingMatch;
-import dev.langchain4j.store.embedding.EmbeddingSearchRequest;
-import dev.langchain4j.store.embedding.inmemory.InMemoryEmbeddingStore;
 import lombok.RequiredArgsConstructor;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -49,6 +48,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -84,16 +84,25 @@ public class RagService {
     private final RagDocumentRepository ragDocumentRepository;
     private final DocumentChunkRepository documentChunkRepository;
     private final ChatSessionDocumentRepository chatSessionDocumentRepository;
-    private final PgVectorChunkSearchRepository pgVectorChunkSearchRepository;
+    private final ChatSessionRepository chatSessionRepository;
+    private final QdrantVectorStoreService qdrantVectorStoreService;
     private final SessionQuizRepository sessionQuizRepository;
     private final OllamaService ollamaService;
     private final PdfVisualAnalysisService pdfVisualAnalysisService;
 
-    private final InMemoryEmbeddingStore<DocumentChunk> embeddingStore = new InMemoryEmbeddingStore<>();
-    private volatile boolean embeddingsInitialized = false;
     private static final List<String> ALLOWED_GENERATION_TYPES = List.of("mixed", "multiple_choice", "short_answer", "ox");
 
     public RagDocumentUploadResponse processPdf(
+            MultipartFile file,
+            String subject,
+            String unitName,
+            String trustLevel
+    ) throws IOException {
+        return processPdf(null, file, subject, unitName, trustLevel);
+    }
+
+    public RagDocumentUploadResponse processPdf(
+            User user,
             MultipartFile file,
             String subject,
             String unitName,
@@ -114,6 +123,7 @@ public class RagService {
         List<TextSegment> segments = splitIntoSegments(text);
 
         RagDocument ragDocument = ragDocumentRepository.save(new RagDocument(
+                user,
                 file.getOriginalFilename(),
                 RagDocument.SourceType.PDF,
                 defaultValue(trustLevel, "internal"),
@@ -228,19 +238,38 @@ public class RagService {
     }
 
     public RagQueryResponse query(String query) {
-        return query(query, (Long) null);
+        return query(null, query);
+    }
+
+    public RagQueryResponse query(User user, String query) {
+        return query(user, query, (Long) null);
     }
 
 
     public RagQueryResponse query(String query, List<Long> documentIds) {
-        if (documentIds == null || documentIds.isEmpty()) {
-            return query(query, (Long) null);
+        return query(null, query, documentIds);
+    }
+
+    public RagQueryResponse query(User user, String query, List<Long> documentIds) {
+        if (documentIds == null) {
+            return query(user, query, (Long) null);
         }
 
-        List<DocumentChunk> allChunks = documentIds.stream()
+        List<Long> selectedDocumentIds = documentIds.stream()
                 .filter(java.util.Objects::nonNull)
                 .distinct()
-                .flatMap(documentId -> documentChunkRepository.findByDocumentIdOrderByChunkIndexAsc(documentId).stream())
+                .toList();
+        if (selectedDocumentIds.isEmpty()) {
+            return new RagQueryResponse(
+                    query,
+                    "No selected PDF documents are available for this chat session.",
+                    List.of()
+            );
+        }
+        requireAccessibleDocuments(user, selectedDocumentIds);
+
+        List<DocumentChunk> allChunks = selectedDocumentIds.stream()
+                .flatMap(documentId -> findChunksForDocument(user, documentId).stream())
                 .toList();
 
         if (allChunks.isEmpty()) {
@@ -251,7 +280,7 @@ public class RagService {
             );
         }
 
-        List<DocumentChunk> topChunks = retrieveRelevantChunks(query, allChunks, null, documentIds);
+        List<DocumentChunk> topChunks = retrieveRelevantChunks(user, query, allChunks, null, selectedDocumentIds);
         if (topChunks.isEmpty()) {
             return new RagQueryResponse(
                     query,
@@ -276,8 +305,12 @@ public class RagService {
     }
 
     public RagDocumentUploadResponse analyzeDocument(Long documentId) {
-        RagDocument document = getDocument(documentId);
-        List<DocumentChunk> chunks = documentChunkRepository.findByDocumentIdOrderByChunkIndexAsc(documentId);
+        return analyzeDocument(null, documentId);
+    }
+
+    public RagDocumentUploadResponse analyzeDocument(User user, Long documentId) {
+        RagDocument document = getDocument(user, documentId);
+        List<DocumentChunk> chunks = findChunksForDocument(user, documentId);
         DocumentUploadAnalysis analysis = analyzeUploadedDocument(document, chunks, document.getExtractedText());
         return new RagDocumentUploadResponse(
                 document,
@@ -291,9 +324,17 @@ public class RagService {
     }
 
     public RagQueryResponse query(String query, Long documentId) {
+        return query(null, query, documentId);
+    }
+
+    public RagQueryResponse query(User user, String query, Long documentId) {
+        if (documentId != null) {
+            getDocument(user, documentId);
+        }
+
         List<DocumentChunk> allChunks = documentId == null
-                ? documentChunkRepository.findAll()
-                : documentChunkRepository.findByDocumentIdOrderByChunkIndexAsc(documentId);
+                ? findAllChunksForUser(user)
+                : findChunksForDocument(user, documentId);
         if (allChunks.isEmpty()) {
             return new RagQueryResponse(
                     query,
@@ -302,7 +343,7 @@ public class RagService {
             );
         }
 
-        List<DocumentChunk> topChunks = retrieveRelevantChunks(query, allChunks, documentId, List.of());
+        List<DocumentChunk> topChunks = retrieveRelevantChunks(user, query, allChunks, documentId, List.of());
         if (topChunks.isEmpty()) {
             return new RagQueryResponse(
                     query,
@@ -325,24 +366,40 @@ public class RagService {
     }
 
     public RagGeneratedQuestionsResponse generateQuestions(Long documentId, String fileName) {
+        return generateQuestions(null, documentId, fileName);
+    }
+
+    public RagGeneratedQuestionsResponse generateQuestions(User user, Long documentId, String fileName) {
         if (documentId != null) {
-            return generateQuestions(documentId);
+            return generateQuestions(user, documentId);
         }
         if (fileName == null || fileName.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "documentId or fileName is required");
         }
 
-        RagDocument document = ragDocumentRepository.findByStoredFileName(fileName)
-                .orElseGet(() -> loadLegacyDocument(fileName));
+        RagDocument document = findByStoredFileName(user, fileName)
+                .orElseGet(() -> loadLegacyDocument(user, fileName));
 
         return buildGeneratedQuestionsResponse(document);
     }
 
     public RagGeneratedQuestionsResponse generateQuestions(Long documentId, String fileName, String type, Integer count) {
-        return generateQuestions(documentId, List.of(), null, fileName, type, count);
+        return generateQuestions(null, documentId, List.of(), null, fileName, type, count);
     }
 
     public RagGeneratedQuestionsResponse generateQuestions(
+            Long documentId,
+            List<Long> documentIds,
+            Long sessionId,
+            String fileName,
+            String type,
+            Integer count
+    ) {
+        return generateQuestions(null, documentId, documentIds, sessionId, fileName, type, count);
+    }
+
+    public RagGeneratedQuestionsResponse generateQuestions(
+            User user,
             Long documentId,
             List<Long> documentIds,
             Long sessionId,
@@ -357,41 +414,149 @@ public class RagService {
                 ? List.of()
                 : documentIds.stream().filter(java.util.Objects::nonNull).distinct().toList();
         if (!selectedDocumentIds.isEmpty()) {
-            return generateQuestions(selectedDocumentIds, sessionId, normalizedType, normalizedCount);
+            return generateQuestions(user, selectedDocumentIds, sessionId, normalizedType, normalizedCount);
         }
         if (documentId != null) {
-            return generateQuestions(documentId, sessionId, normalizedType, normalizedCount);
+            return generateQuestions(user, documentId, sessionId, normalizedType, normalizedCount);
         }
         if (fileName == null || fileName.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "documentId or fileName is required");
         }
 
-        RagDocument document = ragDocumentRepository.findByStoredFileName(fileName)
-                .orElseGet(() -> loadLegacyDocument(fileName));
+        RagDocument document = findByStoredFileName(user, fileName)
+                .orElseGet(() -> loadLegacyDocument(user, fileName));
 
         return buildGeneratedQuestionsResponse(document, normalizedType, normalizedCount, Set.of());
     }
 
     public RagGeneratedQuestionsResponse generateQuestions(Long documentId) {
-        RagDocument document = ragDocumentRepository.findById(documentId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document not found"));
+        return generateQuestions(null, documentId);
+    }
+
+    public RagGeneratedQuestionsResponse generateQuestions(User user, Long documentId) {
+        RagDocument document = getDocument(user, documentId);
 
         return buildGeneratedQuestionsResponse(document);
     }
 
     public List<RagDocumentSummaryResponse> getDocuments() {
-        return ragDocumentRepository.findAll(Sort.by(Sort.Direction.DESC, "createdAt")).stream()
+        return getDocuments(null);
+    }
+
+    public List<RagDocumentSummaryResponse> getDocuments(User user) {
+        List<RagDocument> documents = user == null
+                ? ragDocumentRepository.findAll(Sort.by(Sort.Direction.DESC, "createdAt"))
+                : ragDocumentRepository.findByUserIdOrderByCreatedAtDesc(user.getId());
+        return documents.stream()
                 .map(RagDocumentSummaryResponse::new)
                 .toList();
     }
 
     public RagDocument getDocument(Long documentId) {
+        return getDocument(null, documentId);
+    }
+
+    public RagDocument getDocument(User user, Long documentId) {
+        if (user != null) {
+            return ragDocumentRepository.findByIdAndUserId(documentId, user.getId())
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document not found"));
+        }
         return ragDocumentRepository.findById(documentId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document not found"));
     }
 
+    private List<RagDocument> findAccessibleDocuments(User user, List<Long> documentIds) {
+        if (documentIds == null || documentIds.isEmpty()) {
+            return List.of();
+        }
+
+        List<Long> normalizedDocumentIds = documentIds.stream()
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .toList();
+        if (normalizedDocumentIds.isEmpty()) {
+            return List.of();
+        }
+
+        List<RagDocument> documents = ragDocumentRepository.findAllById(normalizedDocumentIds);
+        if (user == null) {
+            return documents;
+        }
+
+        return documents.stream()
+                .filter(document -> document.getUser() != null && user.getId().equals(document.getUser().getId()))
+                .toList();
+    }
+
+    private void requireAccessibleDocuments(User user, List<Long> documentIds) {
+        if (user == null || documentIds == null || documentIds.isEmpty()) {
+            return;
+        }
+
+        Set<Long> requestedIds = documentIds.stream()
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Set<Long> accessibleIds = findAccessibleDocuments(user, List.copyOf(requestedIds)).stream()
+                .map(RagDocument::getId)
+                .collect(Collectors.toSet());
+
+        if (!accessibleIds.containsAll(requestedIds)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Document not found");
+        }
+    }
+
+    private Optional<RagDocument> findByStoredFileName(User user, String fileName) {
+        if (user == null) {
+            return ragDocumentRepository.findByStoredFileName(fileName);
+        }
+        return ragDocumentRepository.findByStoredFileNameAndUserId(fileName, user.getId());
+    }
+
+    private List<DocumentChunk> findChunksForDocument(User user, Long documentId) {
+        if (user == null) {
+            return documentChunkRepository.findByDocumentIdOrderByChunkIndexAsc(documentId);
+        }
+        return documentChunkRepository.findByDocumentIdAndDocumentUserIdOrderByChunkIndexAsc(documentId, user.getId());
+    }
+
+    private List<DocumentChunk> findAllChunksForUser(User user) {
+        if (user == null) {
+            return documentChunkRepository.findAll();
+        }
+        return documentChunkRepository.findByDocumentUserId(user.getId());
+    }
+
+    private void requireSessionDocuments(User user, Long sessionId, List<Long> documentIds) {
+        if (documentIds == null || documentIds.isEmpty()) {
+            return;
+        }
+
+        requireAccessibleDocuments(user, documentIds);
+
+        if (sessionId == null) {
+            return;
+        }
+
+        ChatSession session = chatSessionRepository.findById(sessionId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Chat session not found"));
+        if (user != null && !user.getId().equals(session.getUser().getId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Chat session does not belong to authenticated user");
+        }
+
+        Set<Long> attachedDocumentIds = chatSessionDocumentRepository.findBySessionIdOrderByIdAsc(sessionId).stream()
+                .map(sessionDocument -> sessionDocument.getDocumentId())
+                .collect(Collectors.toSet());
+        if (!attachedDocumentIds.containsAll(documentIds)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Selected document is not attached to this chat session");
+        }
+    }
+
     public Path resolveStoredFilePath(Long documentId) {
-        RagDocument document = getDocument(documentId);
+        return resolveStoredFilePath(null, documentId);
+    }
+
+    public Path resolveStoredFilePath(User user, Long documentId) {
+        RagDocument document = getDocument(user, documentId);
         Path path = Paths.get(uploadPath).resolve(document.getStoredFileName()).normalize();
         if (!Files.exists(path)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Stored file not found");
@@ -400,11 +565,15 @@ public class RagService {
     }
 
     public RagDocumentSummaryResponse renameDocument(Long documentId, String title) {
+        return renameDocument(null, documentId, title);
+    }
+
+    public RagDocumentSummaryResponse renameDocument(User user, Long documentId, String title) {
         if (title == null || title.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "title is required");
         }
 
-        RagDocument document = getDocument(documentId);
+        RagDocument document = getDocument(user, documentId);
         document.updateTitle(title.trim());
         return new RagDocumentSummaryResponse(ragDocumentRepository.save(document));
     }
@@ -417,7 +586,18 @@ public class RagService {
             String unitName,
             String trustLevel
     ) {
-        RagDocument document = getDocument(documentId);
+        return updateDocumentMetadata(null, documentId, subject, unitName, trustLevel);
+    }
+
+    @Transactional
+    public RagDocumentSummaryResponse updateDocumentMetadata(
+            User user,
+            Long documentId,
+            String subject,
+            String unitName,
+            String trustLevel
+    ) {
+        RagDocument document = getDocument(user, documentId);
 
         document.updateMetadata(
                 defaultValue(subject, document.getSubject()),
@@ -430,9 +610,17 @@ public class RagService {
 
     @Transactional
     public void deleteDocument(Long documentId) {
-        RagDocument document = getDocument(documentId);
+        deleteDocument(null, documentId);
+    }
+
+    @Transactional
+    public void deleteDocument(User user, Long documentId) {
+        RagDocument document = getDocument(user, documentId);
         Path path = Paths.get(uploadPath).resolve(document.getStoredFileName()).normalize();
-        documentChunkRepository.deleteAll(documentChunkRepository.findByDocumentIdOrderByChunkIndexAsc(documentId));
+        if (embeddingEnabled()) {
+            qdrantVectorStoreService.deleteByDocumentId(documentId);
+        }
+        documentChunkRepository.deleteAll(findChunksForDocument(user, documentId));
         chatSessionDocumentRepository.deleteAllByDocumentId(documentId);
         ragDocumentRepository.delete(document);
         try {
@@ -443,29 +631,45 @@ public class RagService {
     }
 
     public RagGeneratedQuestionsResponse generateQuestions(Long documentId, String type, Integer count) {
-        return generateQuestions(documentId, (Long) null, type, count);
+        return generateQuestions(null, documentId, (Long) null, type, count);
     }
 
     public RagGeneratedQuestionsResponse generateQuestions(Long documentId, Long sessionId, String type, Integer count) {
-        RagDocument document = ragDocumentRepository.findById(documentId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document not found"));
+        return generateQuestions(null, documentId, sessionId, type, count);
+    }
+
+    public RagGeneratedQuestionsResponse generateQuestions(User user, Long documentId, Long sessionId, String type, Integer count) {
+        RagDocument document = getDocument(user, documentId);
+        requireSessionDocuments(user, sessionId, List.of(documentId));
 
         return buildGeneratedQuestionsResponse(document, type, count, buildExcludedQuestionFingerprints(sessionId, List.of(documentId)));
     }
 
     public RagGeneratedQuestionsResponse generateQuestions(List<Long> documentIds, String type, Integer count) {
-        return generateQuestions(documentIds, null, type, count);
+        return generateQuestions(null, documentIds, null, type, count);
     }
 
     public RagGeneratedQuestionsResponse generateQuestions(List<Long> documentIds, Long sessionId, String type, Integer count) {
+        return generateQuestions(null, documentIds, sessionId, type, count);
+    }
+
+    public RagGeneratedQuestionsResponse generateQuestions(User user, List<Long> documentIds, Long sessionId, String type, Integer count) {
         if (documentIds == null || documentIds.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "documentIds are required");
         }
 
-        Map<Long, RagDocument> documentsById = ragDocumentRepository.findAllById(documentIds).stream()
-                .collect(Collectors.toMap(RagDocument::getId, document -> document));
-        List<RagDocument> documents = documentIds.stream()
+        List<Long> normalizedDocumentIds = documentIds.stream()
+                .filter(java.util.Objects::nonNull)
                 .distinct()
+                .toList();
+        if (normalizedDocumentIds.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "documentIds are required");
+        }
+        requireSessionDocuments(user, sessionId, normalizedDocumentIds);
+
+        Map<Long, RagDocument> documentsById = findAccessibleDocuments(user, normalizedDocumentIds).stream()
+                .collect(Collectors.toMap(RagDocument::getId, document -> document));
+        List<RagDocument> documents = normalizedDocumentIds.stream()
                 .map(documentId -> {
                     RagDocument document = documentsById.get(documentId);
                     if (document == null) {
@@ -475,10 +679,10 @@ public class RagService {
                 })
                 .toList();
         List<DocumentChunk> chunks = documents.stream()
-                .flatMap(document -> documentChunkRepository.findByDocumentIdOrderByChunkIndexAsc(document.getId()).stream())
+                .flatMap(document -> findChunksForDocument(user, document.getId()).stream())
                 .toList();
 
-        return buildGeneratedQuestionsResponse(documents, chunks, type, count, buildExcludedQuestionFingerprints(sessionId, documentIds));
+        return buildGeneratedQuestionsResponse(documents, chunks, type, count, buildExcludedQuestionFingerprints(sessionId, normalizedDocumentIds));
     }
 
     private RagGeneratedQuestionsResponse buildGeneratedQuestionsResponse(RagDocument document) {
@@ -973,14 +1177,23 @@ public class RagService {
     }
 
     private List<DocumentChunk> retrieveRelevantChunks(String query, List<DocumentChunk> allChunks) {
-        return retrieveRelevantChunks(query, allChunks, null, List.of());
+        return retrieveRelevantChunks(null, query, allChunks, null, List.of());
     }
 
     private List<DocumentChunk> retrieveRelevantChunks(String query, List<DocumentChunk> allChunks, Long documentId, List<Long> documentIds) {
-        List<String> tokens = extractSearchTokens(query);
-        Map<Long, Double> embeddingScores = retrieveWithEmbeddings(query, allChunks, documentId, documentIds);
+        return retrieveRelevantChunks(null, query, allChunks, documentId, documentIds);
+    }
 
-        List<ScoredChunk> ranked = allChunks.stream()
+    private List<DocumentChunk> retrieveRelevantChunks(User user, String query, List<DocumentChunk> allChunks, Long documentId, List<Long> documentIds) {
+        List<String> tokens = extractSearchTokens(query);
+        Map<Long, Double> embeddingScores = retrieveWithEmbeddings(user, query, allChunks, documentId, documentIds);
+        List<DocumentChunk> candidateChunks = embeddingScores.isEmpty()
+                ? allChunks
+                : loadChunksByIdsPreservingOrder(embeddingScores.keySet()).stream()
+                        .filter(chunk -> isAllowedRetrievedChunk(user, chunk, documentId, documentIds))
+                        .toList();
+
+        List<ScoredChunk> ranked = candidateChunks.stream()
                 .map(chunk -> new ScoredChunk(
                         chunk,
                         computeHybridChunkScore(chunk, tokens, embeddingScores.getOrDefault(chunk.getId(), 0.0))
@@ -997,16 +1210,13 @@ public class RagService {
     }
 
     private Map<Long, Double> retrieveWithEmbeddings(String query, List<DocumentChunk> candidateChunks, Long documentId, List<Long> documentIds) {
+        return retrieveWithEmbeddings(null, query, candidateChunks, documentId, documentIds);
+    }
+
+    private Map<Long, Double> retrieveWithEmbeddings(User user, String query, List<DocumentChunk> candidateChunks, Long documentId, List<Long> documentIds) {
         if (!embeddingEnabled()) {
             return Map.of();
         }
-
-        Map<Long, Double> pgVectorScores = retrieveWithPgVector(query, documentId, documentIds);
-        if (!pgVectorScores.isEmpty()) {
-            return pgVectorScores;
-        }
-
-        initializeEmbeddingsIfNeeded();
 
         try {
             Set<Long> candidateIds = candidateChunks.stream()
@@ -1014,67 +1224,21 @@ public class RagService {
                     .collect(Collectors.toSet());
             EmbeddingModel embeddingModel = createEmbeddingModel();
             Embedding queryEmbedding = embeddingModel.embed(query).content();
-            EmbeddingSearchRequest request = new EmbeddingSearchRequest(queryEmbedding, EMBEDDING_SEARCH_WINDOW, 0.45, null);
 
-            return embeddingStore.search(request).matches().stream()
-                    .sorted(Comparator.comparingDouble(EmbeddingMatch<DocumentChunk>::score).reversed())
-                    .filter(match -> candidateIds.contains(match.embedded().getId()))
-                    .collect(Collectors.toMap(
-                            match -> match.embedded().getId(),
-                            EmbeddingMatch::score,
-                            Math::max,
-                            LinkedHashMap::new
-                    ));
-        } catch (Exception e) {
-            return Map.of();
-        }
-    }
-
-    private Map<Long, Double> retrieveWithPgVector(String query, Long documentId, List<Long> documentIds) {
-        try {
-            EmbeddingModel embeddingModel = createEmbeddingModel();
-            Embedding queryEmbedding = embeddingModel.embed(query).content();
-
-            return pgVectorChunkSearchRepository
-                    .searchSimilar(queryEmbedding.vector(), documentId, documentIds, EMBEDDING_SEARCH_WINDOW)
+            return qdrantVectorStoreService
+                    .searchSimilarChunks(queryEmbedding.vector(), user == null ? null : user.getId(), documentId, documentIds, EMBEDDING_SEARCH_WINDOW)
                     .stream()
+                    .filter(match -> candidateIds.contains(match.chunkId()))
                     .collect(Collectors.toMap(
-                            PgVectorChunkSearchRepository.VectorChunkMatch::chunkId,
-                            PgVectorChunkSearchRepository.VectorChunkMatch::score,
+                            QdrantVectorStoreService.VectorChunkMatch::chunkId,
+                            QdrantVectorStoreService.VectorChunkMatch::score,
                             Math::max,
                             LinkedHashMap::new
                     ));
-        } catch (Exception e) {
+        } catch (ResponseStatusException exception) {
+            throw exception;
+        } catch (Exception exception) {
             return Map.of();
-        }
-    }
-
-    private synchronized void initializeEmbeddingsIfNeeded() {
-        if (embeddingsInitialized || !embeddingEnabled()) {
-            return;
-        }
-
-        List<DocumentChunk> chunks = documentChunkRepository.findAll();
-        addChunksToEmbeddingStore(chunks);
-        embeddingsInitialized = true;
-    }
-
-    private void addChunksToEmbeddingStore(List<DocumentChunk> chunks) {
-        if (chunks.isEmpty() || !embeddingEnabled()) {
-            return;
-        }
-
-        try {
-            EmbeddingModel embeddingModel = createEmbeddingModel();
-            List<TextSegment> segments = chunks.stream()
-                    .map(chunk -> TextSegment.from(chunk.getChunkText()))
-                    .toList();
-            List<Embedding> embeddings = embeddingModel.embedAll(segments).content();
-            persistEmbeddingsToPgVector(chunks, embeddings);
-            embeddingStore.addAll(embeddings, chunks);
-            embeddingsInitialized = true;
-        } catch (Exception ignored) {
-            embeddingsInitialized = false;
         }
     }
 
@@ -1090,22 +1254,53 @@ public class RagService {
                     .toList();
             List<Embedding> embeddings = embeddingModel.embedAll(segments).content();
 
-            persistEmbeddingsToPgVector(chunks, embeddings);
-            embeddingStore.addAll(embeddings, chunks);
-            embeddingsInitialized = true;
+            upsertEmbeddingsToQdrant(chunks, embeddings);
+        } catch (ResponseStatusException exception) {
+            throw exception;
         } catch (Exception ignored) {
-            embeddingsInitialized = false;
+            // Embedding creation is optional when OpenAI is not configured correctly.
         }
     }
 
-    private void persistEmbeddingsToPgVector(List<DocumentChunk> chunks, List<Embedding> embeddings) {
+    private void upsertEmbeddingsToQdrant(List<DocumentChunk> chunks, List<Embedding> embeddings) {
         for (int i = 0; i < chunks.size() && i < embeddings.size(); i++) {
-            try {
-                pgVectorChunkSearchRepository.updateEmbedding(chunks.get(i).getId(), embeddings.get(i).vector());
-            } catch (Exception ignored) {
-                // Keep in-memory fallback populated even when pgvector is unavailable.
-            }
+            qdrantVectorStoreService.upsertChunkEmbedding(chunks.get(i), embeddings.get(i).vector());
         }
+    }
+
+    private List<DocumentChunk> loadChunksByIdsPreservingOrder(Set<Long> chunkIds) {
+        if (chunkIds == null || chunkIds.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, DocumentChunk> chunksById = documentChunkRepository.findAllById(chunkIds).stream()
+                .collect(Collectors.toMap(
+                        DocumentChunk::getId,
+                        chunk -> chunk,
+                        (left, right) -> left,
+                        LinkedHashMap::new
+                ));
+        return chunkIds.stream()
+                .map(chunksById::get)
+                .filter(java.util.Objects::nonNull)
+                .toList();
+    }
+
+    private boolean isAllowedRetrievedChunk(User user, DocumentChunk chunk, Long documentId, List<Long> documentIds) {
+        if (chunk == null || chunk.getDocument() == null) {
+            return false;
+        }
+        RagDocument document = chunk.getDocument();
+        if (user != null && (document.getUser() == null || !user.getId().equals(document.getUser().getId()))) {
+            return false;
+        }
+        Set<Long> selectedDocumentIds = new LinkedHashSet<>();
+        if (documentIds != null) {
+            selectedDocumentIds.addAll(documentIds.stream().filter(java.util.Objects::nonNull).toList());
+        }
+        if (documentId != null) {
+            selectedDocumentIds.add(documentId);
+        }
+        return selectedDocumentIds.isEmpty() || selectedDocumentIds.contains(document.getId());
     }
 
     private EmbeddingModel createEmbeddingModel() {
@@ -1120,7 +1315,7 @@ public class RagService {
         return openAiApiKey != null && !openAiApiKey.isBlank();
     }
 
-    private RagDocument loadLegacyDocument(String fileName) {
+    private RagDocument loadLegacyDocument(User user, String fileName) {
         try {
             Path filePath = Paths.get(uploadPath, fileName);
             if (!Files.exists(filePath)) {
@@ -1130,6 +1325,7 @@ public class RagService {
             byte[] bytes = Files.readAllBytes(filePath);
             String text = extractTextFromBytes(bytes);
             RagDocument ragDocument = ragDocumentRepository.save(new RagDocument(
+                    user,
                     fileName,
                     RagDocument.SourceType.PDF,
                     "legacy-upload",

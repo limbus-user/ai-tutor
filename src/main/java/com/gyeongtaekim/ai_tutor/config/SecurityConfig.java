@@ -6,6 +6,7 @@ import com.gyeongtaekim.ai_tutor.security.JwtTokenProvider;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -43,8 +44,23 @@ public class SecurityConfig {
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        // 모든 요청 허용 (테스트용)
-                        .anyRequest().permitAll()
+                        .requestMatchers(
+                                "/",
+                                "/index.html",
+                                "/app.css",
+                                "/app.js",
+                                "/assets/**",
+                                "/favicon.ico"
+                        ).permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/auth/health").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/exam-mocks/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/feedback").permitAll()
+                        .requestMatchers("/api/auth/**").permitAll()
+                        .anyRequest().authenticated()
+                )
+                .addFilterBefore(
+                        new JwtAuthenticationFilter(jwtTokenProvider, customUserDetailsService),
+                        UsernamePasswordAuthenticationFilter.class
                 );
 
         return http.build();

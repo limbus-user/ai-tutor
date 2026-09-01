@@ -1,9 +1,11 @@
 package com.gyeongtaekim.ai_tutor.service;
 
+import com.gyeongtaekim.ai_tutor.domain.User;
 import com.gyeongtaekim.ai_tutor.dto.ChapterDto;
 import com.gyeongtaekim.ai_tutor.dto.LearningSessionDto;
 import com.gyeongtaekim.ai_tutor.dto.WeaknessAnalysisDto;
 import com.gyeongtaekim.ai_tutor.dto.WrongAnswerDto;
+import com.gyeongtaekim.ai_tutor.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
@@ -22,6 +24,7 @@ public class LearningSessionService {
     private final WrongAnswerService wrongAnswerService;
     private final WeaknessAnalysisService weaknessAnalysisService;
     private final RedisTemplate<String, Object> redisTemplate;
+    private final UserRepository userRepository;
 
     private final Map<Long, LearningSessionDto> activeSessions = new ConcurrentHashMap<>();
 
@@ -72,7 +75,7 @@ public class LearningSessionService {
                 query = "취약 단원 " + analysis.getWeaknessTopics().keySet() + "과 관련된 3개의 문제를 생성해 주세요.";
             }
 
-            String response = ragService.query(query).getAnswer();
+            String response = ragService.query(findUserOrNull(userId), query).getAnswer();
             if (response == null || response.isBlank()) {
                 return List.of("Mock Question 1: Sample question?");
             }
@@ -116,5 +119,12 @@ public class LearningSessionService {
 
     private String generateFeedback(String question) {
         return ragService.query("질문 '" + question + "'에 대한 관련 개념을 설명해 주세요.").getAnswer();
+    }
+
+    private User findUserOrNull(Long userId) {
+        if (userId == null) {
+            return null;
+        }
+        return userRepository.findById(userId).orElse(null);
     }
 }

@@ -67,6 +67,7 @@ class AiTutorIntegrationTest {
     @DynamicPropertySource
     static void registerProperties(DynamicPropertyRegistry registry) {
         registry.add("upload.path", () -> TEST_UPLOAD_DIR.toString());
+        registry.add("openai.api.key", () -> "");
     }
 
     @Autowired
@@ -178,7 +179,34 @@ class AiTutorIntegrationTest {
         mockMvc.perform(get("/index.html"))
                 .andExpect(status().isOk())
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content()
-                        .string(org.hamcrest.Matchers.containsString("AI Tutor")));
+                        .string(org.hamcrest.Matchers.containsString("app-shell")))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content()
+                        .string(org.hamcrest.Matchers.containsString("login-form")));
+    }
+
+    @Test
+    void examMocksAreLoadedSeparatelyWithExplanations() throws Exception {
+        mockMvc.perform(get("/api/exam-mocks/it-engineer-20210814"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.quizSetId").value("it-engineer-20210814"))
+                .andExpect(jsonPath("$.examDate").value("2021-08-14"))
+                .andExpect(jsonPath("$.questionCount").value(100))
+                .andExpect(jsonPath("$.questions[0].questionNo").value(1))
+                .andExpect(jsonPath("$.questions[0].explanation").isNotEmpty());
+
+        mockMvc.perform(get("/api/exam-mocks/it-engineer-20220305"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.quizSetId").value("it-engineer-20220305"))
+                .andExpect(jsonPath("$.examDate").value("2022-03-05"))
+                .andExpect(jsonPath("$.questionCount").value(100))
+                .andExpect(jsonPath("$.questions[0].questionNo").value(1))
+                .andExpect(jsonPath("$.questions[0].explanation").isNotEmpty());
+
+        mockMvc.perform(get("/api/exam-mocks/it-engineer-20220424"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.quizSetId").value("it-engineer-20220424"))
+                .andExpect(jsonPath("$.examDate").value("2022-04-24"))
+                .andExpect(jsonPath("$.questionCount").value(100));
     }
 
     @Test
@@ -234,6 +262,128 @@ class AiTutorIntegrationTest {
         mockMvc.perform(get("/api/chat/sessions/{sessionId}/documents", secondSessionId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isEmpty());
+    }
+
+    @Test
+    void ragDocumentsAreScopedByOwnerAndRemainUntilDeleted() throws Exception {
+        long firstUserId = createUser("owner-a@example.com");
+        long secondUserId = createUser("owner-b@example.com");
+
+        MockMultipartFile firstFile = new MockMultipartFile(
+                "file",
+                "owner-a.pdf",
+                "application/pdf",
+                createPdf("Alpha owner persistence marker.")
+        );
+        MockMultipartFile secondFile = new MockMultipartFile(
+                "file",
+                "owner-b.pdf",
+                "application/pdf",
+                createPdf("Beta owner isolation marker.")
+        );
+
+        MvcResult firstUpload = mockMvc.perform(multipart("/api/rag/upload")
+                        .file(firstFile)
+                        .param("userId", String.valueOf(firstUserId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.userId").value(firstUserId))
+                .andReturn();
+        MvcResult secondUpload = mockMvc.perform(multipart("/api/rag/upload")
+                        .file(secondFile)
+                        .param("userId", String.valueOf(secondUserId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.userId").value(secondUserId))
+                .andReturn();
+
+        long firstDocumentId = objectMapper.readTree(firstUpload.getResponse().getContentAsByteArray())
+                .get("documentId")
+                .asLong();
+        long secondDocumentId = objectMapper.readTree(secondUpload.getResponse().getContentAsByteArray())
+                .get("documentId")
+                .asLong();
+
+        assertThat(ragDocumentRepository.findByIdAndUserId(firstDocumentId, firstUserId)).isPresent();
+        assertThat(ragDocumentRepository.findByIdAndUserId(secondDocumentId, secondUserId)).isPresent();
+
+        mockMvc.perform(get("/api/rag/documents").param("userId", String.valueOf(firstUserId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].id").value(firstDocumentId))
+                .andExpect(jsonPath("$[0].userId").value(firstUserId));
+
+        mockMvc.perform(get("/api/rag/documents").param("userId", String.valueOf(secondUserId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].id").value(secondDocumentId))
+                .andExpect(jsonPath("$[0].userId").value(secondUserId));
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "email":"owner-a@example.com",
+                                  "password":"secret"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(firstUserId));
+
+        mockMvc.perform(post("/api/rag/query")
+                        .param("userId", String.valueOf(firstUserId))
+                        .contentType(MediaType.TEXT_PLAIN)
+                        .content("Alpha owner persistence marker"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sources[0]").value(org.hamcrest.Matchers.containsString("owner-a.pdf")))
+                .andExpect(jsonPath("$.sources").value(org.hamcrest.Matchers.everyItem(
+                        org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("owner-b.pdf"))
+                )));
+
+        mockMvc.perform(delete("/api/rag/documents/{documentId}", firstDocumentId)
+                        .param("userId", String.valueOf(firstUserId)))
+                .andExpect(status().isNoContent());
+
+        assertThat(ragDocumentRepository.findById(firstDocumentId)).isEmpty();
+        assertThat(ragDocumentRepository.findById(secondDocumentId)).isPresent();
+    }
+
+    @Test
+    void userContextPreventsCrossUserSessionAndDocumentAccess() throws Exception {
+        long firstUserId = createUser("cross-owner-a@example.com");
+        long secondUserId = createUser("cross-owner-b@example.com");
+        long firstSessionId = createSession(firstUserId);
+        long secondSessionId = createSession(secondUserId);
+
+        MockMultipartFile firstFile = new MockMultipartFile(
+                "file",
+                "cross-owner-a.pdf",
+                "application/pdf",
+                createPdf("Only owner A can attach this document.")
+        );
+
+        MvcResult firstUpload = mockMvc.perform(multipart("/api/rag/upload")
+                        .file(firstFile)
+                        .param("userId", String.valueOf(firstUserId)))
+                .andExpect(status().isOk())
+                .andReturn();
+        long firstDocumentId = objectMapper.readTree(firstUpload.getResponse().getContentAsByteArray())
+                .get("documentId")
+                .asLong();
+
+        mockMvc.perform(get("/api/chat/sessions/{sessionId}", firstSessionId)
+                        .param("userId", String.valueOf(secondUserId)))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(post("/api/chat/sessions/{sessionId}/documents/{documentId}", secondSessionId, firstDocumentId)
+                        .param("userId", String.valueOf(secondUserId)))
+                .andExpect(status().isNotFound());
+
+        mockMvc.perform(post("/api/chat/sessions/{sessionId}/documents/{documentId}", firstSessionId, firstDocumentId)
+                        .param("userId", String.valueOf(firstUserId)))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/chat/sessions/{sessionId}/documents", firstSessionId)
+                        .param("userId", String.valueOf(secondUserId)))
+                .andExpect(status().isForbidden());
     }
 
     @Test
@@ -360,6 +510,9 @@ class AiTutorIntegrationTest {
 
         long documentId = objectMapper.readTree(uploadResult.getResponse().getContentAsByteArray()).get("documentId").asLong();
 
+        mockMvc.perform(post("/api/chat/sessions/{sessionId}/documents/{documentId}", sessionId, documentId))
+                .andExpect(status().isOk());
+
         MvcResult generatedQuestionsResult = mockMvc.perform(post("/api/rag/generate-questions")
                         .param("documentId", String.valueOf(documentId)))
                 .andExpect(status().isOk())
@@ -461,7 +614,7 @@ class AiTutorIntegrationTest {
                         .contentType(MediaType.TEXT_PLAIN)
                         .content("How does binary search shrink the search space?"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.sources[0]").value("binary-search.pdf [chunk 0]"))
+                .andExpect(jsonPath("$.sources[0]").value(org.hamcrest.Matchers.containsString("binary-search.pdf [chunk 0")))
                 .andExpect(jsonPath("$.answer").value(org.hamcrest.Matchers.containsString("halves the remaining search space")));
 
         mockMvc.perform(post("/api/tutor/sessions/{sessionId}/ask", sessionId)
@@ -473,8 +626,8 @@ class AiTutorIntegrationTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.sessionId").value(sessionId))
-                .andExpect(jsonPath("$.sources[0]").value("binary-search.pdf [chunk 0]"))
-                .andExpect(jsonPath("$.answer").value(org.hamcrest.Matchers.containsString("binary-search.pdf [chunk 0]")));
+                .andExpect(jsonPath("$.sources[0]").value(org.hamcrest.Matchers.containsString("binary-search.pdf [chunk 0")))
+                .andExpect(jsonPath("$.answer").value(org.hamcrest.Matchers.containsString("binary-search.pdf [chunk 0")));
 
         MvcResult result = mockMvc.perform(get("/api/chat/sessions/{sessionId}/messages", sessionId))
                 .andExpect(status().isOk())
@@ -484,7 +637,7 @@ class AiTutorIntegrationTest {
                 .andReturn();
 
         JsonNode messages = objectMapper.readTree(result.getResponse().getContentAsByteArray());
-        assertThat(messages.get(1).get("sourceReferences").asText()).contains("binary-search.pdf [chunk 0]");
+        assertThat(messages.get(1).get("sourceReferences").asText()).contains("binary-search.pdf [chunk 0");
     }
 
     @Test
@@ -522,6 +675,9 @@ class AiTutorIntegrationTest {
 
         long firstDocumentId = objectMapper.readTree(firstUpload.getResponse().getContentAsByteArray()).get("documentId").asLong();
 
+        mockMvc.perform(post("/api/chat/sessions/{sessionId}/documents/{documentId}", sessionId, firstDocumentId))
+                .andExpect(status().isOk());
+
         mockMvc.perform(post("/api/tutor/sessions/{sessionId}/ask", sessionId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -529,10 +685,56 @@ class AiTutorIntegrationTest {
                                   "question":"Explain classes and objects simply.",
                                   "documentId": %d
                                 }
-                                """.formatted(firstDocumentId)))
+                """.formatted(firstDocumentId)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.sources[0]").value("java.pdf [chunk 0]"))
+                .andExpect(jsonPath("$.sources[0]").value(org.hamcrest.Matchers.containsString("java.pdf [chunk 0")))
                 .andExpect(jsonPath("$.answer").value(org.hamcrest.Matchers.containsString("classes and objects")))
+                .andExpect(jsonPath("$.answer").value(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("indentation"))));
+    }
+
+    @Test
+    void tutorAskWithoutDocumentIdUsesOnlySessionDocuments() throws Exception {
+        long userId = createUser("session-scope@example.com");
+        long sessionId = createSession(userId);
+
+        MockMultipartFile attachedFile = new MockMultipartFile(
+                "file",
+                "attached-course.pdf",
+                "application/pdf",
+                createPdf("Computer science CPU scheduling includes processes, FCFS, and Round Robin concepts.")
+        );
+        MockMultipartFile unrelatedFile = new MockMultipartFile(
+                "file",
+                "unrelated-history.pdf",
+                "application/pdf",
+                createPdf("Computer science CPU scheduling legacy notes also mention Python indentation and code blocks.")
+        );
+
+        MvcResult attachedUpload = mockMvc.perform(multipart("/api/rag/upload").file(attachedFile))
+                .andExpect(status().isOk())
+                .andReturn();
+        mockMvc.perform(multipart("/api/rag/upload").file(unrelatedFile))
+                .andExpect(status().isOk());
+
+        long attachedDocumentId = objectMapper.readTree(attachedUpload.getResponse().getContentAsByteArray())
+                .get("documentId")
+                .asLong();
+
+        mockMvc.perform(post("/api/chat/sessions/{sessionId}/documents/{documentId}", sessionId, attachedDocumentId))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/tutor/sessions/{sessionId}/ask", sessionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "question":"What does CPU scheduling include?"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sources[0]").value(org.hamcrest.Matchers.containsString("attached-course.pdf [chunk 0")))
+                .andExpect(jsonPath("$.sources").value(org.hamcrest.Matchers.everyItem(
+                        org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("unrelated-history.pdf"))
+                )))
                 .andExpect(jsonPath("$.answer").value(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("indentation"))));
     }
 
@@ -557,6 +759,9 @@ class AiTutorIntegrationTest {
                 .andReturn();
 
         long documentId = objectMapper.readTree(uploadResult.getResponse().getContentAsByteArray()).get("documentId").asLong();
+
+        mockMvc.perform(post("/api/chat/sessions/{sessionId}/documents/{documentId}", sessionId, documentId))
+                .andExpect(status().isOk());
 
         mockMvc.perform(post("/api/rag/generate-questions")
                         .param("documentId", String.valueOf(documentId)))

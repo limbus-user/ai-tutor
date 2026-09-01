@@ -6,6 +6,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 @Configuration
@@ -16,6 +18,7 @@ public class TestAccountInitializer {
     private final PasswordEncoder passwordEncoder;
 
     @Bean
+    @Order(Ordered.HIGHEST_PRECEDENCE)
     public CommandLineRunner seedAdminTestAccount() {
         return args -> {
             User user = userRepository.findByEmail("demo@example.com")
@@ -25,8 +28,16 @@ public class TestAccountInitializer {
                             "Demo Admin"
                     )));
 
+            boolean changed = false;
+            if (!passwordEncoder.matches("secret123", user.getPassword())) {
+                user.changePassword(passwordEncoder.encode("secret123"));
+                changed = true;
+            }
             if (user.getRole() != User.Role.ADMIN) {
                 user.promoteToAdmin();
+                changed = true;
+            }
+            if (changed) {
                 userRepository.save(user);
             }
         };

@@ -8,6 +8,7 @@ import java.time.LocalDateTime;
 @Getter
 public class RagDocumentSummaryResponse {
     private final Long id;
+    private final Long userId;
     private final String title;
     private final String storedFileName;
     private final String subject;
@@ -17,6 +18,7 @@ public class RagDocumentSummaryResponse {
 
     public RagDocumentSummaryResponse(RagDocument document) {
         this.id = document.getId();
+        this.userId = document.getUser() == null ? null : document.getUser().getId();
         this.title = document.getTitle();
         this.storedFileName = document.getStoredFileName();
         this.subject = document.getSubject();

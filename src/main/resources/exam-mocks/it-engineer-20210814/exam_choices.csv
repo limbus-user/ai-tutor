@@ -1,0 +1,401 @@
+﻿question_no,choice_no,choice_text,is_correct
+1,1,요구사항이 고객이 정말 원하는 시스템을 제대로 정의하고 있는지 점검하는 과정이다.,False
+1,2,개발완료 이후에 문제점이 발견될 경우 막대한 재작업 비용이 들 수 있기 때문에 요구사항 검증은 매우 중요하다.,False
+1,3,"요구사항이 실제 요구를 반영하는지, 문서상의 요구사항은 서로 상충되지 않는지 등을 점검한다.",False
+1,4,요구사항 검증 과정을 통해 모든 요구사항 문제를 발견할 수 있다.,True
+2,1,Association,False
+2,2,Dependency,True
+2,3,Realization,False
+2,4,Generalization,False
+3,1,빠른 개발을 위해 테스트를 수행하지 않는다.,True
+3,2,사용자의 요구사항은 언제든지 변할 수있다.,False
+3,3,고객과 직접 대면하며 요구사항을 이야기하기 위해 사용자 스토리(User Story)를 활용할 수 있다.,False
+3,4,기존의 방법론에 비해 실용성(Pragmatism)을 강조한 것이라고 볼 수있다.,False
+4,1,자료 추상화,False
+4,2,제어 추상화,False
+4,3,과정 추상화,False
+4,4,강도 추상화,True
+5,1,필요하지 않은 정보는 접근할 수 없도록 하여 한 모듈 또는 하부시스템이 다른 모듈의 구현에 영향을 받지 않게 설계되는것을 의미한다.,False
+5,2,모듈들 사이의 독립성을 유지시키는 데 도움이 된다.,False
+5,3,"설계에서 은닉되어야 할 기본 정보로는 IP주소와 같은 물리적 코드, 상세 데이터 구조 등이 있다.",False
+5,4,모듈 내부의 자료 구조와 접근 동작들에만 수정을 국한하기 때문에 요구사항 등변화에 따른 수정이 불가능하다.,True
+6,1,개발팀이 응용문제를 이해하는 데 도움을 줄 수 있다.,False
+6,2,유지보수 단계에서만 모델링 기법을 활용한다.,True
+6,3,개발될 시스템에 대하여 여러 분야의 엔지니어들이 공통된 개념을 공유하는 데 도움을 준다.,False
+6,4,절차적인 프로그램을 위한 자료흐름도는 프로세스 위주의 모델링 방법이다.,False
+7,1,요구 분석은 소프트웨어 개발의 실제적인 첫 단계로 사용자의 요구에 대해 이해하는 단계라 할 수 있다.,False
+7,2,요구 추출(Requirement Elicitation)은 프로젝트 계획 단계에 정의한 문제의 범위 안에 있는 사용자의 요구를 찾는 단계이다.,False
+7,3,도메인 분석(Domain Analysis)은 요구에 대한 정보를 수집하고 배경을 분석하여 이를 토대로 모델링을 하게 된다.,False
+7,4,"기능적(Functional) 요구에서 시스템 구축에대한 성능, 보안, 품질, 안정 등에 대한 요구사항을 도출한다.",True
+8,1,Instance,False
+8,2,Operation,True
+8,3,Item,False
+8,4,Hiding,False
+9,1,일반적으로 실시간 시스템에서 사용된다.,False
+9,2,"마스터 프로세스는 일반적으로 연산, 통신, 조정을 책임진다.",False
+9,3,슬레이브 프로세스는 데이터 수집 기능을 수행할 수 없다.,True
+9,4,마스터 프로세스는 슬레이브 프로세스들을 제어할 수 있다.,False
+10,1,Data Flow Diagram,False
+10,2,UML Diagram,False
+10,3,E-R Diagram,False
+10,4,AVL Diagram,True
+11,1,캡슐화는 상위클래스에서 속성이나 연산을 전달받아 새로운 형태의 클래스로 확장하여 사용하는 것을 의미한다.,True
+11,2,객체는 실세계에 존재하거나 생각할 수 있는 것을 말한다.,False
+11,3,클래스는 하나 이상의 유사한 객체들을 묶어 공통된 특성을 표현한 것이다.,False
+11,4,다형성은 상속받은 여러 개의 하위 객체들이 다른 형태의 특성을 갖는 객체로 이용될 수 있는 성질이다.,False
+12,1,사용자와 시스템이 정보를 주고받는 상호작용이 잘 이루어지도록 하는 장치나 소프트웨어를 의미한다.,False
+12,2,편리한 유지보수를 위해 개발자 중심으로 설계되어야 한다.,True
+12,3,배우기가 용이하고 쉽게 사용할 수 있도록 만들어져야 한다.,False
+12,4,사용자 요구사항이 UI에 반영될 수 있도록 구성해야 한다.,False
+13,1,"디자인 패턴을 목적(Purpose)으로 분류할 때 생성, 구조, 행위로 분류할 수 있다.",False
+13,2,Strategy 패턴은 대표적인 구조 패턴으로 인스턴스를 복제하여 사용하는 구조를 말한다.,True
+13,3,행위 패턴은 클래스나 객체들이 상호작용하는 방법과 책임을 분산하는 방법을 정의한다.,False
+13,4,"Singleton 패턴은 특정 클래스의 인스턴스가 오직 하나임을 보장하고, 이 인스턴스에 대한 접근 방법을 제공한다.",False
+14,1,빠른 릴리즈를 통해 문제점을 빠르게 파악할 수 있다.,False
+14,2,정확한 결과 도출을 위해 계획 수립과 문서화에 중점을 둔다.,True
+14,3,고객과의 의사소통을 중요하게 생각한다.,False
+14,4,진화하는 요구사항을 수용하는데 적합하다.,False
+15,1,기능 모델링,True
+15,2,동적 모델링,False
+15,3,객체 모델링,False
+15,4,정적 모델링,False
+16,1,객체들의 상호 작용을 나타내기 위해 사용한다.,False
+16,2,시간의 흐름에 따라 객체들이 주고 받는 메시지의 전달 과정을 강조한다.,False
+16,3,동적 다이어그램보다는 정적 다이어그램에 가깝다.,True
+16,4,교류 다이어그램(Interaction Diagram)의 한 종류로 볼 수 있다.,False
+17,1,동적 모델링 기법이 사용될 수 있다.,False
+17,2,기능 중심으로 시스템을 파악하며 순차적인처리가 중요시되는 하향식(Top-down)방식으로 볼 수 있다.,True
+17,3,데이터와 행위를 하나로 묶어 객체를 정의내리고 추상화시키는 작업이라 할 수 있다.,False
+17,4,코드 재사용에 의한 프로그램 생산성 향상 및 요구에 따른 시스템의 쉬운 변경이 가능하다.,False
+18,1,GUI(Graphical User Interface) <,False
+18,2,CLI(Command Line Interface),True
+18,3,CUI(Cell User Interface),False
+18,4,MUI(Mobile User Interface),False
+19,1,분산 시스템에서 다양한 부분을 관리하고 통신하며 데이터를 교환하게 해주는 소프트웨어로 볼 수 있다.,False
+19,2,위치 투명성(Location Transparency)을 제공한다.,False
+19,3,분산 시스템의 여러 컴포넌트가 요구하는 재사용가능한 서비스의 구현을 제공한다.,False
+19,4,애플리케이션과 사용자 사이에서만 분산서비스를 제공한다.,True
+20,1,"파이프 필터 아키텍처에서 데이터는 파이프를 통해 양방향으로 흐르며, 필터 이동 시 오버헤드가 발생하지 않는다.",True
+20,2,외부에서 인식할 수 있는 특성이 담긴 소프트웨어의 골격이 되는 기본 구조로 볼수 있다.,False
+20,3,데이터 중심 아키텍처는 공유 데이터저장소를 통해 접근자 간의 통신이 이루어지므로 각 접근자의 수정과 확장이 용이하다.,False
+20,4,이해 관계자들의 품질 요구사항을 반영하여 품질 속성을 결정한다. 氠瑢 2과목 : 소프트웨어 개발,False
+21,1,시스템에 고의로 실패를 유도하고 시스템이정상적으로 복귀하는지 테스트한다.,False
+21,2,시스템에 과다 정보량을 부과하여 과부하 시에도 시스템이 정상적으로 작동되는지를 테스트한다.,True
+21,3,"사용자의 이벤트에 시스템이 응답하는 시간,특정 시간 내에 처리하는 업무량, 사용자 요구에 시스템이 반응하는 속도 등을 테스트한다.",False
+21,4,부당하고 불법적인 침입을 시도하여 보안시스템이 불법적인 침투를 잘 막아내는지 테스트한다.,False
+22,1,"6, 3, 5, 7, 9",False
+22,2,"3, 5, 6, 7, 9",True
+22,3,"6, 7, 3, 5, 9",False
+22,4,"3, 5, 9, 6, 7",False
+23,1,ABECDFG,False
+23,2,ABECFDG,False
+23,3,ABCDEFG,False
+23,4,ABEFGCD,True
+24,1,통합 프로그램,False
+24,2,저장소,False
+24,3,모듈,True
+24,4,데이터,False
+25,1,시험대상 모듈을 호출하는 간이 소프트웨어이다.,False
+25,2,필요에 따라 매개 변수를 전달하고 모듈을 수행한 후의 결과를 보여줄 수 있다.,False
+25,3,상향식 통합 테스트에서 사용된다.,False
+25,4,테스트 대상 모듈이 호출하는 하위 모듈의 역할을 한다.,True
+26,1,"스택, 트리",False
+26,2,"큐, 데크",True
+26,3,"큐, 그래프",False
+26,4,"리스트, 그래프",False
+27,1,Overflow,False
+27,2,Top = Top + 1,False
+27,3,Underflow,True
+27,4,Top = Top,False
+28,1,"(가)-㉠, (나)-㉡, (다)-㉢",False
+28,2,"(가)-㉢, (나)-㉡, (다)-㉠",True
+28,3,"(가)-㉠, (나)-㉢, (다)-㉡",False
+28,4,"(가)-㉢, (나)-㉠, (다)-㉡",False
+29,1,"D, C, B, A x",False
+29,2,"B, C, D, A",False
+29,3,"C, B, A, D x",False
+29,4,"D, B, C, A",True
+30,1,소프트웨어 테스트에서 검증과 확인을 구별하면 찾고자 하는 결함 유형을 명확하게 하는 데 도움이 된다.,False
+30,2,"검증은 소프트웨어 개발 과정을 테스트하는 것이고, 확인은 소프트웨어 결과를 테스트 하는 것이다.",False
+30,3,"검증은 작업 제품이 요구 명세의 기능, 비기능 요구사항을 얼마나 잘 준수하는지 측정하는 작업이다.",False
+30,4,"검증은 작업 제품이 사용자의 요구에 적합한지 측정하며, 확인은 작업 제품이 개발자의 기대를 충족시키는지를 측정한다.",True
+31,1,통합 테스트(Integration Test),False
+31,2,단위 테스트(Unit Test),True
+31,3,시스템 테스트(System Test),False
+31,4,인수 테스트(Acceptance Test),False
+32,1,형상 식별은 형상 관리 계획을 근거로 형상관리의 대상이 무엇인지 식별하는 과정이다.,False
+32,2,형상 관리를 통해 가시성과 추적성을 보장함으로써 소프트웨어의 생산성과 품질을 높일 수 있다.,False
+32,3,형상 통제 과정에서는 형상 목록의 변경 요구를 즉시 수용 및 반영해야 한다.,True
+32,4,"형상 감사는 형상 관리 계획대로 형상관리가 진행되고 있는지, 형상 항목의 변경이 요구 사항에 맞도록 제대로 이뤄졌는지 등을 살펴보는 활동이다.",False
+33,1,소스 코드를 실행시키지 않고 분석한다.,False
+33,2,코드에 있는 오류나 잠재적인 오류를 찾아내기 위한 활동이다.,False
+33,3,하드웨어적인 방법으로만 코드 분석이 가능하다.,True
+33,4,자료 흐름이나 논리 흐름을 분석하여 비정상적인 패턴을 찾을 수 있다.,False
+34,1,Fault,True
+34,2,Testcase,False
+34,3,Mistake,False
+34,4,Inspection,False
+35,1,공백을 이용하여 실행문 그룹과 주석을 명확히 구분한다.,False
+35,2,복잡한 논리식과 산술식은 괄호와 들여쓰기(Indentation)를 통해 명확히 표현한다.,False
+35,3,빈 줄을 사용하여 선언부와 구현부를 구별한다.,False
+35,4,한 줄에 최대한 많은 문장을 코딩한다.,True
+36,1,Portability,True
+36,2,Efficiency,False
+36,3,Usability,False
+36,4,Correctness,False
+37,1,이진 탐색트리,True
+37,2,AVL 트리,False
+37,3,2-3 트리,False
+37,4,레드-블랙 트리,False
+38,1,ABDCEF,False
+38,2,ABCDEF,False
+38,3,DBECFA,False
+38,4,DBAECF,True
+39,1,스터브(Stub)와 드라이버(Driver),True
+39,2,입력 도메인 분석,False
+39,3,랜덤(Random) 테스트,False
+39,4,자료 흐름도,False
+40,1,콘텐츠를 제공하는 저작권자를 의미한다.,False
+40,2,콘텐츠를 메타 데이터와 함께 배포 가능한 단위로 묶는다.,True
+40,3,라이선스를 발급하고 관리한다.,False
+40,4,배포된 콘텐츠의 이용 권한을 통제한다. 氠瑢 3과목 : 데이터베이스 구축,False
+41,1,"무결성 규정에는 데이터가 만족해야 될 제약 조건, 규정을 참조할 때 사용하는 식별자 등의 요소가 포함될 수 있다.",False
+41,2,"무결성 규정의 대상으로는 도메인, 키, 종속성 등이 있다.",False
+41,3,정식으로 허가 받은 사용자가 아닌 불법적인 사용자에 의한 갱신으로부터 데이터베이스를 보호하기 위한 규정이다.,True
+41,4,릴레이션 무결성 규정(Relation Integrity Rules)은 릴레이 션을 조작하는 과정에서의 의미적 관계(Semantic Relationship)을 명세한 것이다.,False
+42,1,트랜잭션,True
+42,2,뷰,False
+42,3,튜플,False
+42,4,카디널리티,False
+43,1,[이미지 보기],False
+43,2,[이미지 보기],False
+43,3,[이미지 보기],False
+43,4,[이미지 보기],True
+44,1,물리적 설계의 목적은 효율적인 방법으로 데이터를 저장하는 것이다.,False
+44,2,"트랜잭션 처리량과 응답시간, 디스크 용량 등을 고려해야 한다.",False
+44,3,"저장 레코드의 형식, 순서, 접근 경로와 같은 정보를 사용하여 설계한다.",False
+44,4,"트랜잭션의 인터페이스를 설계하며, 데이터 타입 및 데이터 타입들 간의 관계로 표현한다.",True
+45,1,개체 무결성 제약조건,True
+45,2,참조 무결성 제약조건,False
+45,3,도메인 무결성 제약조건,False
+45,4,속성 무결성 제약조건,False
+46,1,LIKE 절,False
+46,2,WHERE 절,False
+46,3,GROUP BY 절,True
+46,4,ORDER BY 절,False
+47,1,디비전(Division),False
+47,2,프로젝트(Project),False
+47,3,조인(Join),False
+47,4,포크(Fork),True
+48,1,SELECT FROM 07 WHERE 전화번호 DON'T NULL;,False
+48,2,SELECT FROM WHERE 전화번호 != NOT NULL;,False
+48,3,SELECT 학생명 FROM 학적 WHERE 전화번호 IS NOT NULL;,True
+48,4,SELECT FROM WHERE 전화번호 IS NULL;,False
+49,1,후보키,False
+49,2,대체키,False
+49,3,슈퍼키,True
+49,4,외래키,False
+50,1,인덱스의 기본 목적은 검색 성능을 최적화하는 것으로 볼 수 있다.,False
+50,2,B-트리 인덱스는 분기를 목적으로 하는 Branch Block을 가지고 있다.,False
+50,3,BETWEEN 등 범위(Range) 검색에 활용될 수 있다.,False
+50,4,시스템이 자동으로 생성하여 사용자가 변경할 수 없다.,True
+51,1,로킹 단위가 크면 병행성 수준이 낮아진다.,True
+51,2,로킹 단위가 크면 병행 제어 기법이 복잡해진다.,False
+51,3,로킹 단위가 작으면 로크(lock)의 수가 적어진다.,False
+51,4,"로킹은 파일 단위로 이루어지며, 레코드와 필드는 로킹 단위가 될 수 없다.",False
+52,1,원하는 릴레이션을 정의하는 방법을 제공하며 비절차적 언어이다.,True
+52,2,릴레이션 조작을 위한 연산의 집합으로 피연산자와 결과가 모두 릴레이션이다.,False
+52,3,일반 집합 연산과 순수 관계 연산으로 구분된다.,False
+52,4,질의에 대한 해를 구하기 위해 수행해야 할 연산의 순서를 명시한다.,False
+53,1,이상(Anomaly),True
+53,2,제한 (Restriction),False
+53,3,종속성(Dependency) ¸,False
+53,4,변환(Translation),False
+54,1,CREATE,False
+54,2,DELETE,True
+54,3,ALTER,False
+54,4,DROP,False
+55,1,데이터베이스의 개념적 설계 단계 이전에 수행한다.,True
+55,2,데이터 구조의 안정성을 최대화한다.,False
+55,3,"중복을 배제하여 삽입, 삭제, 갱신 이상의 발생을 방지한다.",False
+55,4,데이터 삽입 시 릴레이션을 재구성할 필요성을 줄인다.,False
+56,1,Log,False
+56,2,Consistency,False
+56,3,Isolation,True
+56,4,Durability,False
+57,1,AND,False
+57,2,OTHER,True
+57,3,OR,False
+57,4,NOT,False
+58,1,로킹 기법,False
+58,2,타임스탬프 기법,True
+58,3,검증 기법,False
+58,4,배타 로크 기법,False
+59,1,제3정규형,False
+59,2,제4정규형,False
+59,3,제5정규형,True
+59,4,제6정규형,False
+60,1,Y → X,False
+60,2,Y ⊂ X,False
+60,3,X → Y,True
+60,4,X ⊂ Y 氠瑢 4과목 : 프로그래밍 언어 활용,False
+61,1,Temporal Cohesion,True
+61,2,Logical Cohesion,False
+61,3,Coincidental Cohesion,False
+61,4,Sequential Cohesion,False
+62,1,Stop-and-wait ARQ À,False
+62,2,Go-back-N ARQ,False
+62,3,Selective-Repeat ARQ,False
+62,4,Non-Acknowledge ARQ,True
+63,1,45,False
+63,2,55,False
+63,3,66,True
+63,4,78,False
+64,1,nation,False
+64,2,nationalter,True
+64,3,alter,False
+64,4,alternation,False
+65,1,Heap Collector,False
+65,2,Garbage Collector,True
+65,3,Memory Collector,False
+65,4,Variable Collector,False
+66,1,0,False
+66,2,1,False
+66,3,2,True
+66,4,3,False
+67,1,--,False
+67,2,%,False
+67,3,& à,False
+67,4,=,True
+68,1,53-65-67-37-14-98-122-124-183,True
+68,2,53-98-183-37-122-14-124-65-67,False
+68,3,53-37-14-65-67-98-122-124-183,False
+68,4,53-67-65-124-14-122-37-183-98,False
+69,1,192.168.1.192,False
+69,2,192.168.1.195,False
+69,3,192.168.1.196,True
+69,4,192.168.1.198,False
+70,1,200.168.30.1,True
+70,2,10.3.2.1 4,False
+70,3,225.2.4.1,False
+70,4,172.16.98.3,False
+71,1,0,False
+71,2,4,False
+71,3,8,True
+71,4,12,False
+72,1,C++,False
+72,2,JAVA,False
+72,3,C#,False
+72,4,Python,True
+73,1,13,False
+73,2,21,False
+73,3,34,True
+73,4,55,False
+74,1,프로세스가 준비 상태에서 프로세서가 배당되어 실행 상태로 변화하는 것을 디스패치(Dispatch)라고 한다.,False
+74,2,"프로세스 제어 블록(PCB, Process Control Block)은 프로세스 식별자, 프로세스 상태 등의 정보로 구성된다.",False
+74,3,이전 프로세스의 상태 레지스터 내용을 보관하고 다른 프로세스의 레지스터를 적재하는 과정을 문맥 교환(Context Switching)이라고 한다.,False
+74,4,"프로세스는 스레드(Thread) 내에서 실행되는 흐름의 단위이며, 스레드와 달리 주소 공간에 실행 스택(Stack)이 없다.",True
+75,1,오류가 발생했을 때 전파되어 다른 오류의 원인이 되는 파문 효과(Ripple Effect)를 최소화해야 한다.,False
+75,2,인터페이스가 정확히 설정되어 있지 않을 경우 불필요한 인터페이스가 나타나 모듈 사이의 의존도는 높아지고 결합도가 증가한다.,False
+75,3,모듈들이 변수를 공유하여 사용하게 하거나 제어 정보를 교류하게 함으로써 결합도를 낮추어야 한다.,True
+75,4,다른 모듈과 데이터 교류가 필요한 경우 전역변수(Global Variable)보다는 매개변수(Parameter)를 사용하는 것이 결합도를 낮추는 데 도움이 된다.,False
+76,1,순서번호(Sequence Number)는 전달하는 바이트마다 번호가 부여된다.,False
+76,2,수신번호확인(Acknowledgement Number)은 상대편 호스트에서 받으려는 바이트의 번호를 정의한다.,False
+76,3,체크섬(Checksum)은 데이터를 포함한 세그먼트의 오류를 검사한다.,False
+76,4,윈도우 크기는 송수신 측의 버퍼 크기로 최대크기는 32767bit 이다.,True
+77,1,"소프트웨어의 모듈은 프로그래밍 언어에서 Subroutine, Function 등으로 표현될 수 있다.",False
+77,2,"모듈의 수가 증가하면 상대적으로 각 모듈의 크기가 커지며, 모듈 사이의 상호교류가 감소하여 과부하(Overload) 현상이 나타난다.",True
+77,3,"모듈화는 시스템을 지능적으로 관리할 수 있도록 해주며, 복잡도 문제를 해결하는 데 도움을 준다.",False
+77,4,모듈화는 시스템의 유지보수와 수정을 용이하게 한다.,False
+78,1,FIFO(First-In-First-Out),False
+78,2,LUF(Least Used First),True
+78,3,Optimal,False
+78,4,LRU(Least Recently Used),False
+79,1,int else;,True
+79,2,int Test2;,False
+79,3,int pc;,False
+79,4,int True;,False
+80,1,파일 관리를 위해 시스템이 필요로 하는 정보를 가지고 있다.,False
+80,2,보조기억장치에 저장되어 있다가 파일이 개방(open)되면 주기억장치로 이동된다.,False
+80,3,사용자가 파일 디스크립터를 직접 참조할 수 있다.,True
+80,4,파일 제어 블록(File Control Block)이라고도 한다. 氠瑢 5과목 : 정보시스템 구축관리,False
+81,1,이상 탐지 기법(Anomaly Detection)은 Signature Base나 Knowledge Base라고도 불리며 이미 발견되고 정립된 공격 패턴을 입력해두었다가 탐지 및 차단한다.,True
+81,2,HIDS(Host-Based Intrusion Detection)는 운영체제에 설정된 사용자 계정에 따라 어떤 사용자가 어떤 접근을 시도하고 어떤 작업을 했는지에 대한 기록을 남기고 추적한다.,False
+81,3,NIDS(Network-Based Intrusion Detection System)로는 대표적으로 Snort가 있다.,False
+81,4,외부 인터넷에 서비스를 제공하는 서버가 위치하는 네트워크인 DMZ(Demilitarized Zone)에는 IDS가 설치될 수 있다.,False
+82,1,Mandatory Access Control,True
+82,2,User Access Control,False
+82,3,Discretionary Access Control,False
+82,4,Data-Label Access Control,False
+83,1,타조(Tajo),False
+83,2,원 세그(One Seg),False
+83,3,포스퀘어(Foursquare),False
+83,4,텐서플로(TensorFlow),True
+84,1,N20S,False
+84,2,PaaS-TA,True
+84,3,KAWS,False
+84,4,Metaverse,False
+85,1,적절한 권한을 가진 인가자만 특정 시스템이나 정보에 접근할 수 있도록 통제하는 것이다.,False
+85,2,시스템 및 네트워크에 대한 접근 제어의 가장 기본적인 수단은 IP와 서비스 포트로 볼 수 있다.,False
+85,3,DBMS에 보안 정책을 적용하는 도구인 XDMCP를 통해 데이터베이스에 대한 접근제어를 수행할 수 있다.,True
+85,4,네트워크 장비에서 수행하는 IP에 대한 접근 제어로는 관리 인터페이스의 접근제어와 ACL(Access Control List) 등 있다.,False
+86,1,반제품 상태의 제품을 토대로 도메인별로 필요한 서비스 컴포넌트를 사용하여 재사용성 확대와 성능을 보장 받을 수 있게하는 개발 소프트웨어이다.,False
+86,2,개발해야 할 애플리케이션의 일부분이 이미구현되어 있어 동일한 로직 반복을 줄일 수있다.,False
+86,3,라이브러리와 달리 사용자 코드가 직접호출하여 사용하기 때문에 소프트웨어 개발프레임워크가 직접 코드의 흐름을 제어할수 없다.,True
+86,4,생산성 향상과 유지보수성 향상 등의장점이 있다.,False
+87,1,VLAN,True
+87,2,STP,False
+87,3,L2AN,False
+87,4,ARP,False
+88,1,SQL Injection은 임의로 작성한 SQL 구문을 애플리케이션에 삽입하는 공격방식이다.,False
+88,2,SQL Injection 취약점이 발생하는 곳은 주로웹 애플리케이션과 데이터베이스가 연동되는 부분이다.,False
+88,3,DBMS의 종류와 관계없이 SQL Injection공격 기법은 모두 동일하다.,True
+88,4,로그인과 같이 웹에서 사용자의 입력 값을 받아 데이터베이스 SQL문으로 데이터를요청하는 경우 SQL Injection을 수행할 수 있다.,False
+89,1,DES,False
+89,2,AES,False
+89,3,SMT,False
+89,4,RSA,True
+90,1,Software Defined Storage,True
+90,2,Distribution Oriented Storage,False
+90,3,Network Architected Storage,False
+90,4,Systematic Network Storage,False
+91,1,Embeded,False
+91,2,Organic,True
+91,3,Semi-detached,False
+91,4,Semi-embeded,False
+92,1,Format String,False
+92,2,Ransomware,True
+92,3,Buffer overflow,False
+92,4,Adware,False
+93,1,Waterfall Model,True
+93,2,Prototype Model,False
+93,3,Cocomo Model,False
+93,4,Spiral Model,False
+94,1,비교적 대규모 시스템에 적합하다.,False
+94,2,"개발 순서는 계획 및 정의, 위험 분석, 공학적 개발, 고객 평가 순으로 진행된다.",False
+94,3,소프트웨어를 개발하면서 발생할 수 있는 위험을 관리하고 최소화하는 것을 목적으로 한다.,False
+94,4,"계획, 설계, 개발, 평가의 개발 주기가 한번만 수행된다.",True
+95,1,Role-Based Access Control,False
+95,2,Ping Flood,True
+95,3,Brute-Force,False
+95,4,Trojan Horses,False
+96,1,MLFQ,False
+96,2,MQTT,True
+96,3,Zigbee,False
+96,4,MTSP,False
+97,1,SOS,False
+97,2,SBO,False
+97,3,SSO,True
+97,4,SOA,False
+98,1,Pass flag,False
+98,2,Bucket,False
+98,3,Opcode,False
+98,4,Salt,True
+99,1,Effort Per Task기법,False
+99,2,전문가 감정 기법,False
+99,3,델파이기법,False
+99,4,LOC기법,True
+100,1,WWW,False
+100,2,OWASP,True
+100,3,WBSEC,False
+100,4,ITU,False

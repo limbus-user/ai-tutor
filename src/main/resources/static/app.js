@@ -13,6 +13,9 @@ const state = {
   currentMessages: [],
   currentWorkspace: null,
   quizSession: null,
+  examMock: null,
+  examMockAttempts: [],
+  examMockTimerId: null,
   openQuizSetMenuId: null,
   openDocumentMenuId: null,
   openSessionMenuId: null,
@@ -29,6 +32,7 @@ const state = {
 const views = {
   auth: document.getElementById("auth-view"),
   home: document.getElementById("home-view"),
+  examList: document.getElementById("exam-list-view"),
   workspace: document.getElementById("workspace-view"),
   quiz: document.getElementById("quiz-view"),
 };
@@ -115,6 +119,9 @@ function clearAuth() {
   state.currentMessages = [];
   state.currentWorkspace = null;
   state.quizSession = null;
+  state.examMock = null;
+  state.examMockAttempts = [];
+  stopExamMockTimer();
   state.openQuizSetMenuId = null;
   state.openDocumentMenuId = null;
   state.openSessionMenuId = null;
@@ -235,9 +242,35 @@ async function apiFetch(url, options = {}) {
   return data;
 }
 
+async function downloadDocument(documentInfo) {
+  try {
+    const headers = new Headers();
+    if (state.token) {
+      headers.set("Authorization", `Bearer ${state.token}`);
+    }
+
+    const response = await fetch(`/api/rag/documents/${documentInfo.documentId}/download`, { headers });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || `Download failed (${response.status})`);
+    }
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = documentInfo.title || documentInfo.storedFileName || "document.pdf";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    alert(formatErrorMessage(error, "PDF download failed."));
+  }
+}
+
 function renderHomeHeader() {
-  const roleLabel = state.role ? ` / ${state.role}` : "";
-  document.getElementById("home-user-summary").textContent = `${state.userName} (${state.userEmail})${roleLabel}`;
+  document.getElementById("home-user-summary").textContent = state.userName || "사용자";
   document.getElementById("dev-mode-wrap")?.classList.add("hidden");
 }
 
@@ -274,9 +307,9 @@ function renderSessionList() {
     const status = session.status || "ACTIVE";
     fragment.querySelector(".session-title").textContent = session.title;
     fragment.querySelector(".session-meta").textContent =
-      `sessionId ${session.id} · ${new Date(session.updatedAt).toLocaleString("ko-KR")}`;
+      `${new Date(session.updatedAt).toLocaleString("ko-KR")} 업데이트`;
     const statusElement = fragment.querySelector(".session-status");
-    statusElement.textContent = status === "ACTIVE" ? "ACTIVE" : "완료";
+    statusElement.textContent = status === "ACTIVE" ? "진행 중" : "완료";
     statusElement.classList.toggle("complete", status !== "ACTIVE");
     fragment.querySelector(".open-session-button").addEventListener("click", () => void openExistingSession(session.id));
     const menu = fragment.querySelector(".session-menu");
@@ -345,7 +378,7 @@ function renderHomeDashboard() {
     button.type = "button";
     button.className = "recent-session-item";
     button.innerHTML = `
-      <span class="recent-session-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12a2 2 0 0 1 2 2v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a2 2 0 0 1 2-2Z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span>
+      <span class="recent-session-icon"><img src="/assets/icons/chat-icon.png" alt="" aria-hidden="true"></span>
       <span class="recent-session-copy">
         <strong></strong>
         <small></small>
@@ -364,8 +397,8 @@ function renderWorkspaceHeader() {
   if (!state.currentSession) return;
 
   document.getElementById("workspace-title").textContent = state.currentSession.title;
-  document.getElementById("workspace-subtitle").textContent = `sessionId ${state.currentSession.id} · ${state.userName}`;
-  document.getElementById("workspace-status").textContent = state.currentSession.status || "ACTIVE";
+  document.getElementById("workspace-subtitle").textContent = `${state.userName || "사용자"}님의 학습 워크스페이스`;
+  document.getElementById("workspace-status").textContent = (state.currentSession.status || "ACTIVE") === "ACTIVE" ? "진행 중" : "완료";
 
   const selectedIds = getSelectedQuizDocumentIds();
   const selectedDocuments = (state.currentWorkspace?.documents || [])
@@ -925,7 +958,7 @@ function renderDocuments() {
 
     downloadButton.addEventListener("click", () => {
       state.openDocumentMenuId = null;
-      window.open(`/api/rag/documents/${documentInfo.documentId}/download`, "_blank", "noopener,noreferrer");
+      void downloadDocument(documentInfo);
     });
     renameButton.addEventListener("click", () => void renameDocument(documentInfo));
     deleteButton.addEventListener("click", () => void deleteDocument(documentInfo));
@@ -1096,7 +1129,7 @@ function renderMessages() {
     const card = fragment.querySelector(".message-bubble");
     const isUser = message.role === "USER";
     card.classList.add(isUser ? "user" : "assistant");
-    fragment.querySelector(".message-role").textContent = isUser ? "나" : "튜터";
+    fragment.querySelector(".message-role").textContent = isUser ? "나" : "학습 도우미";
     fragment.querySelector(".message-avatar").innerHTML = isUser
       ? '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>'
       : '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="6" width="14" height="12" rx="4"/><path d="M12 3v3M9 11h.01M15 11h.01M9 15h6"/></svg>';
@@ -1206,6 +1239,315 @@ function buildQuizSessionState(quizSet) {
   };
 }
 
+const EXAM_MOCK_IDS = ["it-engineer-20220424", "it-engineer-20220305", "it-engineer-20210814"];
+
+function buildExamMockSessionState(exam) {
+  const quizSetId = exam.quizSetId || "it-engineer-20220424";
+  const questions = (exam.questions || []).map((question, index) => ({
+    id: `exam-${question.questionNo || index + 1}`,
+    order: question.questionNo || index + 1,
+    type: question.type || "multiple_choice",
+    question: question.question,
+    choices: question.choices || [],
+    correctAnswer: question.correctAnswer,
+    correctChoiceNo: question.correctChoiceNo,
+    modelAnswer: question.correctAnswer,
+    explanation: question.explanation || `${question.correctChoiceNo}번이 정답입니다.`,
+    sourceEvidence: question.subjectName || exam.examName,
+    difficulty: "medium",
+    conceptTag: question.subjectName || "정보처리기사",
+    understandingLevel: question.understandingLevel || "CONCEPT_APPLICATION",
+    mediaUrls: question.mediaUrls || [],
+  }));
+
+  return {
+    sessionId: "mock",
+    quizSetId,
+    documentId: null,
+    sourceDocumentIds: [],
+    title: exam.examName || "정보처리기사 모의고사",
+    questions,
+    currentIndex: 0,
+    answers: {},
+    revealed: {},
+    results: {},
+    retryQuestionIndexes: [],
+    completed: false,
+    examMock: true,
+    flagged: {},
+    startedAt: Date.now(),
+    durationSeconds: 150 * 60,
+  };
+}
+
+function buildExamMockResult(quiz, submittedAnswer) {
+  const submittedChoiceNo = getExamSubmittedChoiceNo(quiz, submittedAnswer);
+  const correctChoiceNo = Number(quiz.correctChoiceNo) || getExamSubmittedChoiceNo(quiz, quiz.correctAnswer);
+  const correct = Boolean(submittedChoiceNo && correctChoiceNo && submittedChoiceNo === correctChoiceNo);
+  const submittedChoiceText = submittedChoiceNo ? quiz.choices?.[submittedChoiceNo - 1] : submittedAnswer;
+  return {
+    submittedAnswer: submittedChoiceNo ? String(submittedChoiceNo) : submittedAnswer,
+    correct,
+    evaluationFeedback: correct
+      ? "정답입니다."
+      : `오답입니다. 내 답은 ${submittedChoiceNo ? `${submittedChoiceNo}번` : submittedChoiceText || "미응답"}이고, 정답은 ${correctChoiceNo ? `${correctChoiceNo}번, ` : ""}${quiz.correctAnswer}입니다.`,
+  };
+}
+
+function getExamSubmittedChoiceNo(quiz, submittedAnswer) {
+  const answer = String(submittedAnswer || "").trim();
+  if (!answer) {
+    return 0;
+  }
+  if (/^[1-4]$/.test(answer)) {
+    return Number(answer);
+  }
+  const index = (quiz.choices || []).findIndex((choice) => String(choice || "").trim() === answer);
+  return index >= 0 ? index + 1 : 0;
+}
+
+function isExamImageChoice(choice) {
+  return /^\[\s*이미지\s*보기\s*\]$/.test(String(choice || "").trim());
+}
+
+function getExamMediaLayout(quiz) {
+  const mediaUrls = Array.isArray(quiz.mediaUrls) ? quiz.mediaUrls : [];
+  const choices = Array.isArray(quiz.choices) ? quiz.choices : [];
+  const imageChoiceCount = choices.filter(isExamImageChoice).length;
+  if (!imageChoiceCount || mediaUrls.length <= 1) {
+    return { questionMediaUrls: mediaUrls, choiceMediaUrls: [] };
+  }
+
+  const choiceMediaUrls = new Array(choices.length).fill(null);
+  const firstChoiceMediaIndex = Math.max(0, mediaUrls.length - imageChoiceCount);
+  let mediaIndex = firstChoiceMediaIndex;
+  choices.forEach((choice, choiceIndex) => {
+    if (isExamImageChoice(choice) && mediaIndex < mediaUrls.length) {
+      choiceMediaUrls[choiceIndex] = mediaUrls[mediaIndex];
+      mediaIndex += 1;
+    }
+  });
+  return {
+    questionMediaUrls: mediaUrls.slice(0, firstChoiceMediaIndex),
+    choiceMediaUrls,
+  };
+}
+
+function appendExamImages(container, mediaUrls, altPrefix) {
+  (mediaUrls || []).filter(Boolean).forEach((mediaUrl, index) => {
+    const image = document.createElement("img");
+    image.src = mediaUrl;
+    image.alt = `${altPrefix} ${index + 1}`;
+    image.loading = "lazy";
+    container.appendChild(image);
+  });
+}
+
+function renderExamOptionContent(container, choice, mediaUrl, choiceNo) {
+  container.textContent = "";
+  if (mediaUrl) {
+    const image = document.createElement("img");
+    image.src = mediaUrl;
+    image.alt = `${choiceNo}번 선택지`;
+    image.loading = "lazy";
+    image.className = "exam-option-image";
+    container.appendChild(image);
+    return;
+  }
+  container.textContent = choice;
+}
+
+async function reportExamQuestionIssue(quiz, currentIndex, mode = "solving") {
+  const promptMessage = [
+    "어떤 오류인지 적어주세요.",
+    "예: 이미지가 안 보임, 정답이 틀림, 해설이 이상함, 문제 문구가 깨짐",
+  ].join("\n");
+  const detail = window.prompt(promptMessage, "");
+  if (detail === null) {
+    return;
+  }
+
+  const normalizedDetail = detail.trim();
+  if (normalizedDetail.length < 5) {
+    alert("오류 내용을 5자 이상 입력해 주세요.");
+    return;
+  }
+
+  const answerKey = String(currentIndex);
+  const selectedAnswer = state.quizSession?.answers?.[answerKey] || "";
+  const selectedChoiceNo = getExamSubmittedChoiceNo(quiz, selectedAnswer);
+  const message = [
+    normalizedDetail,
+    "",
+    "[자동 수집 정보]",
+    `화면: 모의고사 ${mode}`,
+    `시험 ID: ${state.quizSession?.quizSetId || "-"}`,
+    `시험명: ${state.quizSession?.title || "-"}`,
+    `문항: ${quiz.questionNo || quiz.order || currentIndex + 1}번`,
+    `과목: ${quiz.subjectNo || "-"} / ${quiz.subjectName || "-"}`,
+    `선택 답: ${selectedChoiceNo ? `${selectedChoiceNo}번` : "미선택"}`,
+    `정답: ${quiz.correctChoiceNo || "-"}번`,
+    `문제: ${quiz.question || ""}`,
+    `선택지: ${(quiz.choices || []).map((choice, index) => `${index + 1}. ${choice}`).join(" | ")}`,
+    `이미지: ${(quiz.mediaUrls || []).join(", ") || "-"}`,
+    `URL: ${window.location.href}`,
+    `시각: ${new Date().toISOString()}`,
+  ].join("\n");
+
+  try {
+    await apiFetch("/api/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: state.currentUser?.email || "",
+        category: "exam-question-bug",
+        message,
+      }),
+    });
+    alert("오류 제보가 접수되었습니다.");
+  } catch (error) {
+    alert(formatErrorMessage(error, "오류 제보를 보내지 못했습니다."));
+  }
+}
+
+function loadExamMockAttempts() {
+  return Array.isArray(state.examMockAttempts) ? state.examMockAttempts : [];
+}
+
+async function fetchExamMockAttempts() {
+  if (!state.token) {
+    state.examMockAttempts = [];
+    return [];
+  }
+  const attemptGroups = await Promise.all(
+    EXAM_MOCK_IDS.map((quizSetId) => apiFetch(`/api/exam-mocks/${quizSetId}/attempts`).catch(() => [])),
+  );
+  state.examMockAttempts = attemptGroups.flat().filter(Boolean);
+  return state.examMockAttempts;
+}
+
+async function saveExamMockAttempt() {
+  const session = state.quizSession;
+  if (!session?.examMock) {
+    return;
+  }
+
+  const attemptId = session.examAttemptId || `${session.quizSetId || "exam"}-${Date.now()}`;
+  const attempt = {
+    attemptId,
+    quizSetId: session.quizSetId,
+    quizSetTitle: session.title,
+    createdAt: new Date().toISOString(),
+    questions: (session.questions || []).map((quiz, index) => ({
+      id: quiz.id || index,
+      question: quiz.question || "",
+      conceptTag: quiz.conceptTag || quiz.subjectName || "정보처리기사",
+      understandingLevel: quiz.understandingLevel || "CONCEPT_APPLICATION",
+    })),
+      results: session.results || {},
+    };
+  const savedAttempt = await apiFetch(`/api/exam-mocks/${session.quizSetId}/attempts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(attempt),
+  });
+  const attempts = loadExamMockAttempts().filter((item) => item.attemptId !== savedAttempt.attemptId);
+  attempts.unshift(savedAttempt);
+  state.examMockAttempts = attempts.slice(0, 10);
+  session.examAttemptId = attemptId;
+}
+
+async function openItEngineerMockExam(quizSetId = "it-engineer-20220424") {
+  try {
+    const [exam] = await Promise.all([
+      apiFetch(`/api/exam-mocks/${quizSetId}`),
+      fetchExamMockAttempts(),
+    ]);
+    state.examMock = exam;
+    state.quizSession = buildExamMockSessionState(exam);
+    startExamMockTimer();
+    renderQuizSession();
+    showView("quiz");
+  } catch (error) {
+    alert(formatErrorMessage(error, "정보처리기사 모의고사를 불러오지 못했습니다."));
+  }
+}
+
+async function openExamList() {
+  stopExamMockTimer();
+  state.quizSession = null;
+  document.getElementById("quiz-view")?.classList.remove("exam-mock-active");
+  restoreQuizTopActions();
+  try {
+    await fetchExamMockAttempts();
+  } catch (error) {
+    state.examMockAttempts = [];
+  }
+  renderExamListStats();
+  showView("examList");
+}
+
+function renderExamListStats() {
+  EXAM_MOCK_IDS.forEach((quizSetId) => {
+    const shortId = quizSetId.replace("it-engineer-", "");
+    const attempts = loadExamMockAttempts().filter((attempt) => attempt.quizSetId === quizSetId);
+    const countTarget = document.getElementById(`exam-${shortId}-attempt-count`);
+    const scoreTarget = document.getElementById(`exam-${shortId}-last-score`);
+    if (countTarget) {
+      countTarget.textContent = `풀이 기록 ${attempts.length}회`;
+    }
+    if (scoreTarget) {
+      if (!attempts.length) {
+        scoreTarget.textContent = "최근 점수 없음";
+        return;
+      }
+      const latest = buildQuizSetSummary(attempts[0].questions || [], {
+        results: attempts[0].results || {},
+      });
+      scoreTarget.textContent = `최근 ${latest.accuracy}% (${latest.correctCount}/${latest.totalCount})`;
+    }
+  });
+}
+
+function startExamMockTimer() {
+  stopExamMockTimer();
+  state.examMockTimerId = window.setInterval(updateExamMockTimer, 1000);
+}
+
+function stopExamMockTimer() {
+  if (state.examMockTimerId) {
+    window.clearInterval(state.examMockTimerId);
+    state.examMockTimerId = null;
+  }
+}
+
+function getExamAnsweredCount() {
+  return Object.values(state.quizSession?.answers || {}).filter((answer) => String(answer || "").trim()).length;
+}
+
+function getExamRemainingSeconds() {
+  const session = state.quizSession;
+  if (!session?.startedAt || !session?.durationSeconds) {
+    return 0;
+  }
+  const elapsedSeconds = Math.floor((Date.now() - session.startedAt) / 1000);
+  return Math.max(0, session.durationSeconds - elapsedSeconds);
+}
+
+function formatExamTime(seconds) {
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+}
+
+function updateExamMockTimer() {
+  const timer = document.getElementById("exam-mock-timer");
+  if (!timer || !state.quizSession?.examMock) {
+    return;
+  }
+  timer.textContent = formatExamTime(getExamRemainingSeconds());
+}
+
 function syncQuizInState(updatedQuiz) {
   state.currentWorkspace.quizzes = (state.currentWorkspace?.quizzes || []).map((quiz) =>
     quiz.id === updatedQuiz.id ? updatedQuiz : quiz,
@@ -1216,6 +1558,436 @@ function syncQuizInState(updatedQuiz) {
       quiz.id === updatedQuiz.id ? updatedQuiz : quiz,
     );
   }
+}
+
+function renderExamMockSession(board, quizzes) {
+  document.getElementById("quiz-view")?.classList.add("exam-mock-active");
+  const currentIndex = Math.min(state.quizSession?.currentIndex || 0, quizzes.length - 1);
+  const quiz = quizzes[currentIndex];
+  const answerKey = String(currentIndex);
+  const selectedAnswer = state.quizSession.answers[answerKey] || "";
+  const answeredCount = getExamAnsweredCount();
+  const retryIndexes = state.quizSession.retryQuestionIndexes || [];
+  const retryPosition = retryIndexes.indexOf(currentIndex);
+  const isExamRetryMode = retryIndexes.length > 0;
+  const disablePrev = isExamRetryMode ? retryPosition <= 0 : currentIndex <= 0;
+  const disableNext = isExamRetryMode ? retryPosition < 0 || retryPosition >= retryIndexes.length - 1 : currentIndex >= quizzes.length - 1;
+
+  document.getElementById("quiz-session-title").textContent = state.quizSession.title || "정보처리기사 모의고사";
+  document.getElementById("quiz-session-subtitle").textContent = `CBT · ${quizzes.length}문항`;
+
+  board.innerHTML = `
+    <div class="exam-mock-shell">
+      <section class="exam-mock-main">
+        <article class="exam-question-card">
+          <div class="exam-question-head">
+            <div>
+              <span class="exam-subject-pill">${quiz.subjectName || `${quiz.subjectNo || ""}과목`}</span>
+              <span class="exam-question-no">${quiz.order || currentIndex + 1}번</span>
+            </div>
+            <button type="button" class="exam-report-button">오류 제보</button>
+          </div>
+          <h2 class="exam-question-title"></h2>
+          <div class="exam-media-slot"></div>
+          <div class="exam-options"></div>
+        </article>
+        <div class="exam-bottom-bar">
+          <button type="button" class="exam-check-toggle ${state.quizSession.flagged?.[answerKey] ? "active" : ""}">
+            체크
+          </button>
+          <span>${isExamRetryMode ? `복습 ${retryPosition + 1} / ${retryIndexes.length}` : `문항 ${currentIndex + 1} / ${quizzes.length}`}</span>
+          <div class="exam-nav-actions">
+            <button type="button" class="secondary-button exam-prev-button" ${disablePrev ? "disabled" : ""}>이전</button>
+            <button type="button" class="exam-next-button" ${disableNext ? "disabled" : ""}>다음</button>
+          </div>
+        </div>
+      </section>
+      <aside class="exam-omr-panel">
+        <div class="exam-omr-head">
+          <strong>답안지 · OMR</strong>
+          <span>${answeredCount}/${quizzes.length}</span>
+        </div>
+        <div class="exam-legend">
+          <span><i class="answered"></i>선택</span>
+          <span><i class="flagged"></i>체크</span>
+          <span><i></i>미응답</span>
+        </div>
+        <div class="exam-omr-list"></div>
+        <button type="button" class="exam-submit-bottom">${isExamRetryMode ? "복습 답안 제출" : "답안 제출"}</button>
+      </aside>
+    </div>
+  `;
+
+  board.querySelector(".exam-question-title").textContent = quiz.question || "";
+
+  const mediaLayout = getExamMediaLayout(quiz);
+  const mediaSlot = board.querySelector(".exam-media-slot");
+  appendExamImages(mediaSlot, mediaLayout.questionMediaUrls, `${quiz.order || currentIndex + 1}번 문제 자료`);
+
+  const options = board.querySelector(".exam-options");
+  (quiz.choices || []).forEach((choice, choiceIndex) => {
+    const choiceNo = choiceIndex + 1;
+    const optionValue = String(choiceNo);
+    const selected = getExamSubmittedChoiceNo(quiz, selectedAnswer) === choiceNo;
+    const label = document.createElement("label");
+    label.className = `exam-option-card${selected ? " selected" : ""}`;
+    label.innerHTML = `
+      <input type="radio" name="exam-current" value="${optionValue}">
+      <span class="exam-option-no">${choiceNo}</span>
+      <span class="exam-option-text"></span>
+    `;
+    label.querySelector("input").checked = selected;
+    renderExamOptionContent(label.querySelector(".exam-option-text"), choice, mediaLayout.choiceMediaUrls[choiceIndex], choiceNo);
+    label.addEventListener("click", () => {
+      state.quizSession.answers[answerKey] = optionValue;
+      renderQuizSession();
+    });
+    options.appendChild(label);
+  });
+
+  renderExamOmr(board.querySelector(".exam-omr-list"), quizzes);
+  bindExamMockControls(board, currentIndex, quizzes);
+  renderExamTopActions();
+  updateExamMockTimer();
+}
+
+function renderExamMockReviewSession(board, quizzes) {
+  document.getElementById("quiz-view")?.classList.add("exam-mock-active");
+  const currentIndex = Math.min(state.quizSession?.currentIndex || 0, quizzes.length - 1);
+  const quiz = quizzes[currentIndex];
+  const answerKey = String(currentIndex);
+  const result = state.quizSession.results[answerKey] || {};
+  const selectedAnswer = result.submittedAnswer || state.quizSession.answers[answerKey] || "";
+  const correctAnswer = quiz.correctAnswer || "";
+  const selectedChoiceNo = getExamSubmittedChoiceNo(quiz, selectedAnswer);
+  const correctChoiceNo = Number(quiz.correctChoiceNo) || getExamSubmittedChoiceNo(quiz, correctAnswer);
+  const correctCount = quizzes.filter((item, index) => state.quizSession.results[String(index)]?.correct).length;
+
+  document.getElementById("quiz-session-title").textContent = state.quizSession.title || "정보처리기사 모의고사";
+  document.getElementById("quiz-session-subtitle").textContent = `해설 보기 · ${correctCount}/${quizzes.length} 정답`;
+
+  board.innerHTML = `
+    <div class="exam-mock-shell exam-review-shell">
+      <section class="exam-mock-main">
+        <article class="exam-question-card exam-review-card">
+          <div class="exam-question-head">
+            <div>
+              <span class="exam-subject-pill">${quiz.subjectName || `${quiz.subjectNo || ""}과목`}</span>
+              <span class="exam-question-no">${quiz.order || currentIndex + 1}번</span>
+            </div>
+            <button type="button" class="exam-report-button">오류 제보</button>
+          </div>
+          <h2 class="exam-question-title"></h2>
+          <div class="exam-media-slot"></div>
+          <div class="exam-options"></div>
+          <div class="exam-review-feedback ${result.correct ? "correct" : "wrong"}">
+            <strong>${result.correct ? "정답" : "오답"}${selectedChoiceNo ? ` · 내 답 ${selectedChoiceNo}번` : " · 미응답"} · 정답 ${correctChoiceNo || "-"}번</strong>
+            <p>${result.evaluationFeedback || ""}</p>
+            <p><b>해설</b> ${quiz.explanation || `${correctChoiceNo || "-"}번 선택지가 정답입니다. 선택지와 문제 조건을 다시 비교해 보세요.`}</p>
+          </div>
+        </article>
+        <div class="exam-bottom-bar">
+          <button type="button" class="secondary-button exam-summary-button">결과 요약</button>
+          <span>문항 ${currentIndex + 1} / ${quizzes.length}</span>
+          <div class="exam-nav-actions">
+            <button type="button" class="secondary-button exam-prev-button" ${currentIndex <= 0 ? "disabled" : ""}>이전</button>
+            <button type="button" class="exam-next-button" ${currentIndex >= quizzes.length - 1 ? "disabled" : ""}>다음</button>
+          </div>
+        </div>
+      </section>
+      <aside class="exam-omr-panel">
+        <div class="exam-omr-head">
+          <strong>채점표 · OMR</strong>
+          <span>${correctCount}/${quizzes.length}</span>
+        </div>
+        <div class="exam-legend">
+          <span><i class="correct"></i>정답</span>
+          <span><i class="wrong"></i>오답</span>
+          <span><i></i>현재</span>
+        </div>
+        <div class="exam-omr-list"></div>
+        <button type="button" class="exam-submit-bottom exam-summary-button">결과 요약 보기</button>
+      </aside>
+    </div>
+  `;
+
+  board.querySelector(".exam-question-title").textContent = quiz.question || "";
+
+  const mediaLayout = getExamMediaLayout(quiz);
+  const mediaSlot = board.querySelector(".exam-media-slot");
+  appendExamImages(mediaSlot, mediaLayout.questionMediaUrls, `${quiz.order || currentIndex + 1}번 문제 자료`);
+
+  const options = board.querySelector(".exam-options");
+  (quiz.choices || []).forEach((choice, choiceIndex) => {
+    const choiceNo = choiceIndex + 1;
+    const selected = getExamSubmittedChoiceNo(quiz, selectedAnswer) === choiceNo;
+    const correct = correctChoiceNo === choiceNo;
+    const label = document.createElement("div");
+    label.className = [
+      "exam-option-card",
+      "exam-review-option",
+      selected ? "selected" : "",
+      correct ? "correct-answer" : "",
+      selected && !correct ? "wrong-answer" : "",
+    ].filter(Boolean).join(" ");
+    label.innerHTML = `
+      <span class="exam-option-no">${choiceNo}</span>
+      <span class="exam-option-text"></span>
+    `;
+    renderExamOptionContent(label.querySelector(".exam-option-text"), choice, mediaLayout.choiceMediaUrls[choiceIndex], choiceNo);
+    options.appendChild(label);
+  });
+
+  renderExamReviewOmr(board.querySelector(".exam-omr-list"), quizzes);
+  bindExamReviewControls(board, currentIndex, quizzes);
+  renderExamReviewTopActions();
+}
+
+function renderExamOmr(container, quizzes) {
+  container.innerHTML = "";
+  const retryIndexes = state.quizSession?.retryQuestionIndexes || [];
+  const groups = new Map();
+  quizzes.forEach((quiz, index) => {
+    const key = `${quiz.subjectNo || 0}|${quiz.subjectName || "기타"}`;
+    if (!groups.has(key)) {
+      groups.set(key, []);
+    }
+    groups.get(key).push({ quiz, index });
+  });
+
+  groups.forEach((items, key) => {
+    const [, subjectName] = key.split("|");
+    const section = document.createElement("section");
+    section.className = "exam-omr-subject";
+    section.innerHTML = `<h3>${items[0].quiz.subjectNo || ""}과목 · ${subjectName}</h3><div class="exam-omr-grid"></div>`;
+    const grid = section.querySelector(".exam-omr-grid");
+    items.forEach(({ quiz, index }) => {
+      const answer = state.quizSession.answers[String(index)] || "";
+      const flagged = Boolean(state.quizSession.flagged?.[String(index)]);
+      const disabledByRetry = retryIndexes.length > 0 && !retryIndexes.includes(index);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.disabled = disabledByRetry;
+      button.className = [
+        "exam-omr-button",
+        index === state.quizSession.currentIndex ? "current" : "",
+        answer ? "answered" : "",
+        flagged ? "flagged" : "",
+        disabledByRetry ? "disabled" : "",
+      ].filter(Boolean).join(" ");
+      button.innerHTML = `<span>${quiz.order || index + 1}</span><strong>${answer ? (getExamSubmittedChoiceNo(quiz, answer) || "-") : "-"}</strong>`;
+      button.addEventListener("click", () => {
+        if (disabledByRetry) {
+          return;
+        }
+        state.quizSession.currentIndex = index;
+        renderQuizSession();
+      });
+      grid.appendChild(button);
+    });
+    container.appendChild(section);
+  });
+}
+
+function renderExamReviewOmr(container, quizzes) {
+  container.innerHTML = "";
+  const groups = new Map();
+  quizzes.forEach((quiz, index) => {
+    const key = `${quiz.subjectNo || 0}|${quiz.subjectName || "기타"}`;
+    if (!groups.has(key)) {
+      groups.set(key, []);
+    }
+    groups.get(key).push({ quiz, index });
+  });
+
+  groups.forEach((items, key) => {
+    const [, subjectName] = key.split("|");
+    const section = document.createElement("section");
+    section.className = "exam-omr-subject";
+    section.innerHTML = `<h3>${items[0].quiz.subjectNo || ""}과목 · ${subjectName}</h3><div class="exam-omr-grid"></div>`;
+    const grid = section.querySelector(".exam-omr-grid");
+    items.forEach(({ quiz, index }) => {
+      const result = state.quizSession.results[String(index)] || {};
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = [
+        "exam-omr-button",
+        "reviewed",
+        index === state.quizSession.currentIndex ? "current" : "",
+        result.correct ? "correct" : "wrong",
+      ].filter(Boolean).join(" ");
+      button.innerHTML = `<span>${quiz.order || index + 1}</span><strong>${result.correct ? "O" : "X"}</strong>`;
+      button.addEventListener("click", () => {
+        state.quizSession.currentIndex = index;
+        renderQuizSession();
+      });
+      grid.appendChild(button);
+    });
+    container.appendChild(section);
+  });
+}
+
+function bindExamMockControls(board, currentIndex, quizzes) {
+  board.querySelector(".exam-prev-button")?.addEventListener("click", () => {
+    const retryIndexes = state.quizSession?.retryQuestionIndexes || [];
+    if (retryIndexes.length) {
+      const retryPosition = retryIndexes.indexOf(currentIndex);
+      if (retryPosition > 0) {
+        state.quizSession.currentIndex = retryIndexes[retryPosition - 1];
+        renderQuizSession();
+      }
+      return;
+    }
+    if (currentIndex > 0) {
+      state.quizSession.currentIndex = currentIndex - 1;
+      renderQuizSession();
+    }
+  });
+  board.querySelector(".exam-next-button")?.addEventListener("click", () => {
+    const retryIndexes = state.quizSession?.retryQuestionIndexes || [];
+    if (retryIndexes.length) {
+      const retryPosition = retryIndexes.indexOf(currentIndex);
+      if (retryPosition >= 0 && retryPosition < retryIndexes.length - 1) {
+        state.quizSession.currentIndex = retryIndexes[retryPosition + 1];
+        renderQuizSession();
+      }
+      return;
+    }
+    if (currentIndex < quizzes.length - 1) {
+      state.quizSession.currentIndex = currentIndex + 1;
+      renderQuizSession();
+    }
+  });
+  board.querySelector(".exam-check-toggle")?.addEventListener("click", () => {
+    const key = String(currentIndex);
+    state.quizSession.flagged[key] = !state.quizSession.flagged[key];
+    renderQuizSession();
+  });
+  board.querySelector(".exam-report-button")?.addEventListener("click", () => {
+    void reportExamQuestionIssue(quizzes[currentIndex], currentIndex, "풀이 중");
+  });
+  board.querySelector(".exam-submit-bottom")?.addEventListener("click", submitExamMock);
+}
+
+function bindExamReviewControls(board, currentIndex, quizzes) {
+  board.querySelector(".exam-prev-button")?.addEventListener("click", () => {
+    if (currentIndex > 0) {
+      state.quizSession.currentIndex = currentIndex - 1;
+      renderQuizSession();
+    }
+  });
+  board.querySelector(".exam-next-button")?.addEventListener("click", () => {
+    if (currentIndex < quizzes.length - 1) {
+      state.quizSession.currentIndex = currentIndex + 1;
+      renderQuizSession();
+    }
+  });
+  board.querySelectorAll(".exam-summary-button").forEach((button) => {
+    button.addEventListener("click", () => renderQuizSummary(board, quizzes));
+  });
+  board.querySelector(".exam-report-button")?.addEventListener("click", () => {
+    void reportExamQuestionIssue(quizzes[currentIndex], currentIndex, "해설 보기");
+  });
+}
+
+function renderExamTopActions() {
+  const actions = document.querySelector("#quiz-view .topbar-actions");
+  if (!actions || !state.quizSession?.examMock) {
+    return;
+  }
+  actions.innerHTML = `
+    <button id="exam-mock-exit-button" type="button" class="secondary-button">나가기</button>
+    <span class="exam-top-timer" id="exam-mock-timer">--:--</span>
+    <span class="exam-top-progress">진행 ${getExamAnsweredCount()} / ${state.quizSession.questions.length}</span>
+    <button id="exam-mock-submit-button" type="button">제출하기</button>
+  `;
+  document.getElementById("exam-mock-submit-button")?.addEventListener("click", submitExamMock);
+  document.getElementById("exam-mock-exit-button")?.addEventListener("click", handleBackFromQuiz);
+}
+
+function renderExamReviewTopActions() {
+  const actions = document.querySelector("#quiz-view .topbar-actions");
+  if (!actions || !state.quizSession?.examMock) {
+    return;
+  }
+  actions.innerHTML = `
+    <button id="exam-mock-exit-button" type="button" class="secondary-button">나가기</button>
+    <span class="exam-top-progress">해설 보기 ${state.quizSession.currentIndex + 1} / ${state.quizSession.questions.length}</span>
+    <button id="exam-summary-top-button" type="button">결과 요약</button>
+  `;
+  document.getElementById("exam-summary-top-button")?.addEventListener("click", () => {
+    renderQuizSummary(document.getElementById("quiz-session-board"), state.quizSession?.questions || []);
+  });
+  document.getElementById("exam-mock-exit-button")?.addEventListener("click", handleBackFromQuiz);
+}
+
+function restoreQuizTopActions() {
+  const actions = document.querySelector("#quiz-view .topbar-actions");
+  if (!actions || actions.querySelector("#back-workspace-button")) {
+    return;
+  }
+  actions.innerHTML = `
+    <button id="back-workspace-button" type="button" class="secondary-button">학습 화면으로</button>
+    <button id="quiz-logout-button" type="button" class="secondary-button">로그아웃</button>
+  `;
+  document.getElementById("quiz-logout-button").addEventListener("click", logoutToAuth);
+  document.getElementById("back-workspace-button").addEventListener("click", handleBackFromQuiz);
+}
+
+function handleBackFromQuiz() {
+  if (state.quizSession?.examMock) {
+    stopExamMockTimer();
+    state.quizSession = null;
+    document.getElementById("quiz-view")?.classList.remove("exam-mock-active");
+    restoreQuizTopActions();
+    renderExamListStats();
+    showView("examList");
+    return;
+  }
+
+  renderWorkspaceHeader();
+  renderDocuments();
+  renderMessages();
+  renderQuizSets();
+  showView("workspace");
+}
+
+async function submitExamMock() {
+  const quizzes = state.quizSession?.questions || [];
+  const retryIndexes = state.quizSession?.retryQuestionIndexes || [];
+  const targetIndexes = retryIndexes.length ? retryIndexes : quizzes.map((_, index) => index);
+  const unanswered = targetIndexes.filter((index) => !String(state.quizSession.answers[String(index)] || "").trim()).length;
+  if (unanswered > 0 && !window.confirm(`미응답 ${unanswered}문항이 있습니다. 그대로 제출할까요?`)) {
+    return;
+  }
+
+  targetIndexes.forEach((index) => {
+    const quiz = quizzes[index];
+    const key = String(index);
+    const submittedAnswer = state.quizSession.answers[key] || "";
+    state.quizSession.revealed[key] = true;
+    state.quizSession.results[key] = submittedAnswer
+      ? buildExamMockResult(quiz, submittedAnswer)
+      : {
+          submittedAnswer: "",
+          correct: false,
+          evaluationFeedback: `미응답입니다. 정답은 ${quiz.correctChoiceNo ? `${quiz.correctChoiceNo}번, ` : ""}${quiz.correctAnswer}입니다.`,
+        };
+  });
+  try {
+    await saveExamMockAttempt();
+  } catch (error) {
+    alert(formatErrorMessage(error, "모의고사 풀이 기록을 저장하지 못했습니다."));
+    return;
+  }
+  state.quizSession.completed = true;
+  state.quizSession.retryQuestionIndexes = [];
+  state.quizSession.currentIndex = quizzes.findIndex((quiz, index) => !state.quizSession.results[String(index)]?.correct);
+  if (state.quizSession.currentIndex < 0) {
+    state.quizSession.currentIndex = 0;
+  }
+  stopExamMockTimer();
+  renderQuizSession();
 }
 
 async function renameQuizSet(quizSet) {
@@ -1264,8 +2036,14 @@ function renderQuizSession() {
   board.innerHTML = "";
 
   const quizzes = state.quizSession?.questions || [];
+  if (!state.quizSession?.examMock) {
+    document.getElementById("quiz-view")?.classList.remove("exam-mock-active");
+    restoreQuizTopActions();
+  }
   document.getElementById("quiz-session-title").textContent = state.quizSession?.title || "퀴즈 세션";
-  document.getElementById("quiz-session-subtitle").textContent = `sessionId ${state.quizSession?.sessionId || "-"} · ${quizzes.length}문제`;
+  document.getElementById("quiz-session-subtitle").textContent = state.quizSession?.examMock
+    ? `정보처리기사 필기 · ${quizzes.length}문제`
+    : `학습 퀴즈 · ${quizzes.length}문제`;
 
   if (!quizzes.length) {
     board.innerHTML = '<div class="empty-box">선택된 퀴즈가 없습니다.</div>';
@@ -1273,7 +2051,18 @@ function renderQuizSession() {
   }
 
   if (state.quizSession?.completed) {
+    if (state.quizSession?.examMock) {
+      renderExamMockReviewSession(board, quizzes);
+      return;
+    }
+    document.getElementById("quiz-view")?.classList.remove("exam-mock-active");
+    restoreQuizTopActions();
     renderQuizSummary(board, quizzes);
+    return;
+  }
+
+  if (state.quizSession?.examMock) {
+    renderExamMockSession(board, quizzes);
     return;
   }
 
@@ -1295,6 +2084,19 @@ function renderQuizSession() {
   fragment.querySelector(".quiz-type").textContent = formatQuizTypeLabel(quiz.type);
   fragment.querySelector(".quiz-order").textContent = `${currentIndex + 1} / ${quizzes.length}`;
   fragment.querySelector(".quiz-question").textContent = quiz.question;
+  const mediaUrls = Array.isArray(quiz.mediaUrls) ? quiz.mediaUrls : [];
+  if (mediaUrls.length) {
+    const mediaWrap = document.createElement("div");
+    mediaWrap.className = "exam-question-media";
+    mediaUrls.forEach((mediaUrl) => {
+      const image = document.createElement("img");
+      image.src = mediaUrl;
+      image.alt = `${quiz.order || currentIndex + 1}번 문제 자료`;
+      image.loading = "lazy";
+      mediaWrap.appendChild(image);
+    });
+    fragment.querySelector(".quiz-question").after(mediaWrap);
+  }
   hintContent.textContent = quiz.sourceEvidence || quiz.modelAnswer || "힌트가 없습니다.";
 
   if (quiz.choices?.length) {
@@ -1345,6 +2147,15 @@ function renderQuizSession() {
 
     submitButton.disabled = true;
     try {
+      if (state.quizSession?.examMock) {
+        const result = buildExamMockResult(quiz, currentAnswer);
+        state.quizSession.answers[answerKey] = result.submittedAnswer;
+        state.quizSession.revealed[answerKey] = true;
+        state.quizSession.results[answerKey] = result;
+        renderQuizSession();
+        return;
+      }
+
       const updatedQuiz = await apiFetch(`/api/chat/sessions/${state.quizSession.sessionId}/quizzes/${quiz.id}/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1423,9 +2234,33 @@ function isAnswerCorrect(submittedAnswer, correctAnswer) {
 }
 
 function renderQuizSummary(board, quizzes) {
-  const analysis = buildQuizAnalysis(quizzes);
-  const comparisonSets = buildSameDocumentQuizSetSummaries(analysis);
+  const isExamMockSummary = Boolean(state.quizSession?.examMock);
+  const analysis = buildQuizAnalysis(quizzes, state.quizSession?.results || {}, {
+    topConceptLimit: isExamMockSummary ? 5 : 3,
+  });
+  const comparisonSets = isExamMockSummary
+    ? buildExamMockComparisonSummaries(analysis)
+    : buildSameDocumentQuizSetSummaries(analysis);
   const radarSvg = buildRadarChartSvg(analysis.stageResults);
+  const topConceptHeading = isExamMockSummary ? "오답 과목" : "부족 개념 TOP 3";
+  const topConceptEmptyHtml = isExamMockSummary
+    ? '<li><span class="rank-badge rank-1">1</span><span>오답 과목 없음</span><strong>0문제 오답</strong></li>'
+    : '<li><span class="rank-badge rank-1">1</span><span>반복 오답 개념 없음</span><strong>오답 0개</strong></li>';
+  const formatTopConceptCount = (item) => isExamMockSummary ? `${item.wrongCount}문제 오답` : `오답 ${item.wrongCount}개`;
+  const examReviewAction = isExamMockSummary
+    ? '<button type="button" class="secondary-button exam-review-return-button">해설 다시 보기</button>'
+    : "";
+  const backButtonLabel = isExamMockSummary ? "기출문제로 이동" : "학습 화면으로 이동";
+  const reviewQuestionButtonLabel = isExamMockSummary ? "이 문제만 다시풀기" : "다시풀기";
+  const comparisonEyebrow = isExamMockSummary ? "Mock Exam History" : "Feedback Compare";
+  const comparisonHeading = isExamMockSummary ? "모의고사 풀이 기록 비교" : "최종 피드백 비교";
+  const comparisonCopy = isExamMockSummary
+    ? "현재 모의고사 결과와 이전 풀이 기록의 점수, 오답 과목, 피드백을 비교합니다."
+    : "같은 PDF에서 생성된 다른 퀴즈 결과와 현재 결과를 비교합니다.";
+  const comparisonButtonLabel = isExamMockSummary ? "기록 비교 열기" : "비교 화면 열기";
+  const comparisonSmallText = comparisonSets.length > 1
+    ? `비교 가능한 결과 ${comparisonSets.length}개`
+    : (isExamMockSummary ? "저장된 이전 풀이 기록 없음" : "비교 가능한 이전 결과 없음");
   const wrongQuestions = analysis.wrongQuestions.map((item) => `
     <li data-review-index="${item.index}">
       <span class="review-book-icon" aria-hidden="true">${bookIconSvg()}</span>
@@ -1433,7 +2268,7 @@ function renderQuizSummary(board, quizzes) {
         <strong>${item.conceptTag}</strong>
         <p>${item.question}</p>
       </div>
-      <button type="button" class="text-button review-question-button" data-review-index="${item.index}">다시풀기</button>
+      <button type="button" class="text-button review-question-button" data-review-index="${item.index}">${reviewQuestionButtonLabel}</button>
     </li>
   `).join("");
 
@@ -1492,9 +2327,9 @@ function renderQuizSummary(board, quizzes) {
 
         <section class="summary-column-stack">
           <section class="summary-panel dashboard-compact-panel">
-            <h3>부족 개념 TOP 3</h3>
+            <h3>${topConceptHeading}</h3>
             <ol class="summary-concept-list">
-              ${analysis.topConcepts.map((item, index) => `<li><span class="rank-badge rank-${index + 1}">${index + 1}</span><span>${item.name}</span><strong>오답 ${item.wrongCount}개</strong></li>`).join("") || '<li><span class="rank-badge rank-1">1</span><span>반복 오답 개념 없음</span><strong>오답 0개</strong></li>'}
+              ${analysis.topConcepts.map((item, index) => `<li><span class="rank-badge rank-${index + 1}">${index + 1}</span><span>${item.name}</span><strong>${formatTopConceptCount(item)}</strong></li>`).join("") || topConceptEmptyHtml}
             </ol>
           </section>
 
@@ -1527,9 +2362,9 @@ function renderQuizSummary(board, quizzes) {
 
         <section class="summary-panel ai-final-feedback-card">
           <div class="ai-final-feedback-head">
-            <span>AI</span>
+            <span>OK</span>
             <div>
-              <h3>AI 최종 피드백</h3>
+              <h3>최종 학습 피드백</h3>
               <p>이번 퀴즈 기준으로 다음 학습 우선순위를 제안합니다.</p>
             </div>
           </div>
@@ -1537,26 +2372,35 @@ function renderQuizSummary(board, quizzes) {
         </section>
         <section class="summary-panel comparison-entry-card">
           <div>
-            <p class="eyebrow">Feedback Compare</p>
-            <h3>최종 피드백 비교</h3>
-            <p class="summary-copy">같은 PDF에서 생성된 다른 퀴즈 결과와 현재 결과를 비교합니다.</p>
+            <p class="eyebrow">${comparisonEyebrow}</p>
+            <h3>${comparisonHeading}</h3>
+            <p class="summary-copy">${comparisonCopy}</p>
           </div>
-          <button type="button" class="quiz-open-comparison-button">비교 화면 열기</button>
-          <small>${comparisonSets.length > 1 ? `비교 가능한 결과 ${comparisonSets.length}개` : "비교 가능한 이전 결과 없음"}</small>
+          <button type="button" class="quiz-open-comparison-button">${comparisonButtonLabel}</button>
+          <small>${comparisonSmallText}</small>
         </section>
       </div>
 
 
       <div class="quiz-summary-actions">
+        ${examReviewAction}
         <button type="button" class="secondary-button quiz-reset-all-button">문제들 다시풀기</button>
         <button type="button" class="secondary-button quiz-review-wrong-button">틀린 문제 다시 보기</button>
-        <button type="button" class="quiz-back-workspace-button">학습 화면으로 이동</button>
+        <button type="button" class="quiz-back-workspace-button">${backButtonLabel}</button>
       </div>
     </article>
   `;
 
   board.querySelector(".quiz-back-workspace-button").addEventListener("click", () => {
+    if (state.quizSession?.examMock) {
+      handleBackFromQuiz();
+      return;
+    }
     showView("workspace");
+  });
+  board.querySelector(".exam-review-return-button")?.addEventListener("click", () => {
+    state.quizSession.currentIndex = 0;
+    renderExamMockReviewSession(board, quizzes);
   });
 
   board.querySelector(".quiz-review-wrong-button").addEventListener("click", () => {
@@ -1568,6 +2412,10 @@ function renderQuizSummary(board, quizzes) {
   });
 
   board.querySelector(".quiz-open-comparison-button").addEventListener("click", () => {
+    if (state.quizSession?.examMock) {
+      renderExamMockComparisonScreen(board, analysis);
+      return;
+    }
     renderQuizComparisonScreen(board, analysis);
   });
 
@@ -1648,6 +2496,119 @@ function renderQuizComparisonScreen(board, currentAnalysis = buildQuizAnalysis(s
   firstPreviousButton?.classList.add("selected");
 }
 
+function renderExamMockComparisonScreen(board, currentAnalysis = buildQuizAnalysis(state.quizSession?.questions || [])) {
+  const comparisonSets = buildExamMockComparisonSummaries(currentAnalysis);
+  const current = comparisonSets.find((item) => item.isCurrent) || buildQuizSetSummary(state.quizSession?.questions || [], {
+    quizSetId: state.quizSession?.examAttemptId || state.quizSession?.quizSetId,
+    quizSetTitle: state.quizSession?.title,
+    isCurrent: true,
+    results: state.quizSession?.results || {},
+  });
+  const previousSets = comparisonSets.filter((item) => !item.isCurrent);
+  const defaultPrevious = previousSets[0] || null;
+  const detailHtml = defaultPrevious
+    ? renderComparisonDetail(current, defaultPrevious)
+    : `<div class="empty-box">저장된 이전 모의고사 풀이 기록이 없습니다. 같은 회차를 한 번 더 풀면 이 화면에서 점수와 오답 과목 변화를 비교할 수 있습니다.</div>${renderComparisonColumn("현재 결과", current)}`;
+
+  board.innerHTML = `
+    <article class="quiz-summary-card quiz-comparison-screen">
+      <div class="quiz-summary-header comparison-screen-header">
+        <div>
+          <p class="eyebrow">Mock Exam Compare</p>
+          <h2>모의고사 풀이 기록 비교</h2>
+          <p class="summary-copy">현재 정보처리기사 모의고사 결과와 내 계정에 저장된 이전 풀이 기록을 비교합니다.</p>
+        </div>
+        <button type="button" class="secondary-button quiz-back-result-button">결과 화면으로 돌아가기</button>
+      </div>
+
+      <div class="comparison-layout">
+        <section class="summary-panel comparison-list-panel">
+          <h3>저장된 모의고사 풀이 기록</h3>
+          <div class="comparison-result-list">
+            ${comparisonSets.map((item) => `
+              <div class="comparison-result-item comparison-result-item-with-action ${item.isCurrent ? "current" : ""}" role="button" tabindex="0" data-quiz-set-id="${item.quizSetId}">
+                <div>
+                  <span>${item.isCurrent ? "현재" : "이전"} · ${formatDateTimeLabel(item.createdAt)}</span>
+                  <strong>${item.quizSetTitle || "정보처리기사 모의고사"}</strong>
+                  <small>${item.accuracy}% · ${item.correctCount}/${item.totalCount} 정답</small>
+                </div>
+                ${item.isCurrent ? "" : `<button type="button" class="comparison-attempt-delete-button" data-attempt-id="${item.quizSetId}">삭제</button>`}
+              </div>
+            `).join("")}
+          </div>
+        </section>
+
+        <section class="summary-panel comparison-detail-panel">
+          <h3>현재 결과 vs 이전 풀이 비교</h3>
+          <div id="comparison-detail-content">${detailHtml}</div>
+        </section>
+      </div>
+    </article>
+  `;
+
+  board.querySelector(".quiz-back-result-button").addEventListener("click", () => {
+    renderQuizSummary(board, state.quizSession?.questions || []);
+  });
+
+  board.querySelectorAll(".comparison-result-item").forEach((itemElement) => {
+    const selectAttempt = () => {
+      const selected = comparisonSets.find((item) => item.quizSetId === itemElement.dataset.quizSetId);
+      if (!selected?.isCurrent) {
+        board.querySelector("#comparison-detail-content").innerHTML = renderComparisonDetail(current, selected);
+      }
+      board.querySelectorAll(".comparison-result-item").forEach((item) => item.classList.remove("selected"));
+      itemElement.classList.add("selected");
+    };
+    itemElement.addEventListener("click", (event) => {
+      if (event.target.closest(".comparison-attempt-delete-button")) {
+        return;
+      }
+      selectAttempt();
+    });
+    itemElement.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        selectAttempt();
+      }
+    });
+  });
+
+  board.querySelectorAll(".comparison-attempt-delete-button").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void deleteExamMockAttempt(button.dataset.attemptId);
+    });
+  });
+
+  const firstPreviousButton = Array.from(board.querySelectorAll(".comparison-result-item"))
+    .find((itemElement) => itemElement.dataset.quizSetId !== String(current.quizSetId));
+  firstPreviousButton?.classList.add("selected");
+}
+
+async function deleteExamMockAttempt(attemptId) {
+  if (!attemptId) {
+    return;
+  }
+  const confirmed = window.confirm("이 모의고사 풀이 기록을 삭제할까요?");
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    const quizSetId = state.quizSession?.quizSetId || "it-engineer-20220424";
+    await apiFetch(`/api/exam-mocks/${quizSetId}/attempts/${encodeURIComponent(attemptId)}`, {
+      method: "DELETE",
+    });
+    state.examMockAttempts = loadExamMockAttempts().filter((attempt) => attempt.attemptId !== attemptId);
+    renderExamMockComparisonScreen(
+      document.getElementById("quiz-session-board"),
+      buildQuizAnalysis(state.quizSession?.questions || [], state.quizSession?.results || {}, { topConceptLimit: 5 }),
+    );
+  } catch (error) {
+    alert(formatErrorMessage(error, "모의고사 풀이 기록을 삭제하지 못했습니다."));
+  }
+}
+
 function renderComparisonDetail(current, previous) {
   if (!previous) {
     return `
@@ -1684,6 +2645,10 @@ function renderComparisonDetail(current, previous) {
 }
 
 function renderComparisonColumn(label, summary) {
+  const isExamMockComparison = Boolean(state.quizSession?.examMock);
+  const topConceptLabel = isExamMockComparison ? "오답 과목" : "부족 개념 TOP";
+  const feedbackHeading = isExamMockComparison ? "모의고사 피드백" : "최종 학습 피드백 요약";
+  const feedbackLabel = isExamMockComparison ? "현재 풀이 결과 기준 피드백" : "현재 결과에서 나온 최종 피드백";
   return `
     <section class="comparison-column ${summary?.isCurrent ? "current" : ""}">
       <p>${label}</p>
@@ -1700,13 +2665,13 @@ function renderComparisonColumn(label, summary) {
         ).join("")}
       </div>
       <div class="comparison-top-concepts">
-        <strong>부족 개념 TOP</strong>
-        <p>${formatTopConcepts(summary?.topConcepts || [])}</p>
+        <strong>${topConceptLabel}</strong>
+        <p>${formatTopConcepts(summary?.topConcepts || [], isExamMockComparison)}</p>
       </div>
       <div class="comparison-feedback-summary">
-        <strong>AI 최종 피드백 요약</strong>
-        ${summary?.isCurrent ? '<span class="current-feedback-label">현재 결과에서 나온 최종 피드백</span>' : ""}
-        <p>${summarizeFeedback(summary?.feedback || "")}</p>
+        <strong>${feedbackHeading}</strong>
+        ${summary?.isCurrent ? `<span class="current-feedback-label">${feedbackLabel}</span>` : ""}
+        <p>${formatComparisonFeedback(summary?.feedback || "")}</p>
       </div>
     </section>
   `;
@@ -1738,6 +2703,53 @@ function renderDeltaCard(label, currentValue, previousValue) {
       <small>현재 ${currentValue}% · 이전 ${previousValue}%</small>
     </div>
   `;
+}
+
+function buildExamMockComparisonSummaries(currentAnalysis) {
+  const currentAttemptId = state.quizSession?.examAttemptId || state.quizSession?.quizSetId || "current-exam";
+  const summaries = loadExamMockAttempts()
+    .filter((attempt) => attempt.quizSetId === state.quizSession?.quizSetId)
+    .map((attempt) => buildQuizSetSummary(attempt.questions || [], {
+      quizSetId: attempt.attemptId,
+      quizSetTitle: attempt.quizSetTitle,
+      createdAt: attempt.createdAt,
+      isCurrent: attempt.attemptId === state.quizSession?.examAttemptId,
+      results: attempt.results || {},
+      topConceptLimit: 5,
+    }));
+
+  if (!summaries.some((item) => item.isCurrent)) {
+    summaries.unshift({
+      ...currentAnalysis,
+      quizSetId: currentAttemptId,
+      quizSetTitle: state.quizSession?.title,
+      sourceDocumentIds: [],
+      isCurrent: true,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  return summaries.sort((a, b) => {
+    if (a.isCurrent) return -1;
+    if (b.isCurrent) return 1;
+    return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+  });
+}
+
+function formatDateTimeLabel(value) {
+  if (!value) {
+    return "-";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "-";
+  }
+  return date.toLocaleString("ko-KR", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function buildSameDocumentQuizSetSummaries(currentAnalysis) {
@@ -1798,7 +2810,9 @@ function buildQuizSetSummary(quizzes, options = {}) {
       evaluationFeedback: quiz.evaluationFeedback || "",
     },
   ]));
-  const analysis = buildQuizAnalysis(quizzes || [], results);
+  const analysis = buildQuizAnalysis(quizzes || [], results, {
+    topConceptLimit: options.topConceptLimit,
+  });
   return {
     ...analysis,
     quizSetId: options.quizSetId,
@@ -1853,10 +2867,10 @@ function stageRateFromSummary(summary, level) {
   return findStageRate(summary?.stageResults || [], level);
 }
 
-function formatTopConcepts(topConcepts) {
+function formatTopConcepts(topConcepts, isExamMock = false) {
   return topConcepts.length
-    ? topConcepts.map((item, index) => `${index + 1}. ${item.name} (${item.wrongCount})`).join(" · ")
-    : "부족 개념 없음";
+    ? topConcepts.map((item, index) => `${index + 1}. ${item.name} (${isExamMock ? `${item.wrongCount}문제 오답` : item.wrongCount})`).join(" · ")
+    : (isExamMock ? "오답 과목 없음" : "부족 개념 없음");
 }
 
 function summarizeFeedback(feedback) {
@@ -1864,16 +2878,21 @@ function summarizeFeedback(feedback) {
   return normalized.length > 120 ? `${normalized.slice(0, 120)}...` : normalized || "피드백 없음";
 }
 
+function formatComparisonFeedback(feedback) {
+  return (feedback || "").replace(/\s+/g, " ").trim() || "피드백 없음";
+}
+
 function bookIconSvg() {
   return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4.5A2.5 2.5 0 0 1 7.5 2H20v17H7.5A2.5 2.5 0 0 0 5 21.5Z"/><path d="M5 4.5v17A2.5 2.5 0 0 1 7.5 19H20"/><path d="M9 6h7"/></svg>`;
 }
 
-function buildQuizAnalysis(quizzes, results = state.quizSession?.results || {}) {
+function buildQuizAnalysis(quizzes, results = state.quizSession?.results || {}, options = {}) {
   const totalCount = quizzes.length;
   const wrongQuestions = [];
   const conceptStats = new Map();
   const stageStats = new Map();
   let correctCount = 0;
+  const topConceptLimit = options.topConceptLimit || 3;
 
   quizzes.forEach((quiz, index) => {
     const result = results[String(index)] || { submittedAnswer: "", correct: false };
@@ -1904,7 +2923,7 @@ function buildQuizAnalysis(quizzes, results = state.quizSession?.results || {}) 
   const accuracy = totalCount ? Math.round((correctCount / totalCount) * 100) : 0;
   const topConcepts = Array.from(conceptStats.entries())
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 3)
+    .slice(0, topConceptLimit)
     .map(([name, wrongCount]) => ({ name, wrongCount }));
 
   const orderedLevels = ["CONCEPT_UNDERSTANDING", "CONCEPT_DISTINCTION", "CONCEPT_APPLICATION"];
@@ -2111,11 +3130,25 @@ function findNextRetryQuestionIndex(currentIndex) {
 
 async function restartWrongQuestions(wrongQuestions) {
   if (!wrongQuestions.length) {
-    showView("workspace");
+    showView(state.quizSession?.examMock ? "home" : "workspace");
     return;
   }
 
   try {
+    if (state.quizSession?.examMock) {
+      wrongQuestions.forEach((item) => {
+        const key = String(item.index);
+        delete state.quizSession.answers[key];
+        delete state.quizSession.revealed[key];
+        delete state.quizSession.results[key];
+      });
+      state.quizSession.retryQuestionIndexes = wrongQuestions.map((item) => item.index);
+      state.quizSession.currentIndex = wrongQuestions[0].index;
+      state.quizSession.completed = false;
+      renderQuizSession();
+      return;
+    }
+
     const resetResults = await Promise.all(wrongQuestions.map((item) => {
       const quiz = state.quizSession.questions[item.index];
       const quizId = item.quizId || quiz?.id;
@@ -2156,6 +3189,17 @@ async function resetCurrentQuizSet() {
   }
 
   try {
+    if (state.quizSession?.examMock) {
+      state.quizSession.answers = {};
+      state.quizSession.revealed = {};
+      state.quizSession.results = {};
+      state.quizSession.retryQuestionIndexes = [];
+      state.quizSession.currentIndex = 0;
+      state.quizSession.completed = false;
+      renderQuizSession();
+      return;
+    }
+
     const resetQuizzes = await apiFetch(
       `/api/chat/sessions/${state.quizSession.sessionId}/quizzes/sets/${state.quizSession.quizSetId}/reset`,
       { method: "POST" },
@@ -2245,7 +3289,7 @@ function toWorkspaceDocument(documentInfo) {
 
 async function pingServer() {
   try {
-    await apiFetch("/api/users");
+    await apiFetch("/api/auth/health");
     setServerStatus("서버 연결됨");
   } catch {
     setServerStatus("서버 연결 실패", true);
@@ -2817,17 +3861,17 @@ document.getElementById("show-signup-button").addEventListener("click", showSign
 document.getElementById("hide-signup-button").addEventListener("click", hideSignupForm);
 document.getElementById("show-feedback-button").addEventListener("click", showFeedbackForm);
 document.getElementById("hide-feedback-button").addEventListener("click", hideFeedbackForm);
+document.getElementById("exam-mock-button")?.addEventListener("click", () => void openExamList());
+document.getElementById("exam-list-back-home-button")?.addEventListener("click", () => showView("home"));
+document.getElementById("exam-list-logout-button")?.addEventListener("click", logoutToAuth);
+document.getElementById("start-it-engineer-20220424-button")?.addEventListener("click", () => void openItEngineerMockExam("it-engineer-20220424"));
+document.getElementById("start-it-engineer-20220305-button")?.addEventListener("click", () => void openItEngineerMockExam("it-engineer-20220305"));
+document.getElementById("start-it-engineer-20210814-button")?.addEventListener("click", () => void openItEngineerMockExam("it-engineer-20210814"));
 document.getElementById("logout-button").addEventListener("click", logoutToAuth);
 document.getElementById("workspace-logout-button").addEventListener("click", logoutToAuth);
 document.getElementById("quiz-logout-button").addEventListener("click", logoutToAuth);
 document.getElementById("back-home-button").addEventListener("click", async () => void loadHome());
-document.getElementById("back-workspace-button").addEventListener("click", () => {
-  renderWorkspaceHeader();
-  renderDocuments();
-  renderMessages();
-  renderQuizSets();
-  showView("workspace");
-});
+document.getElementById("back-workspace-button").addEventListener("click", handleBackFromQuiz);
 document.getElementById("start-new-study-button").addEventListener("click", () => {
   document.getElementById("new-study-form").classList.toggle("hidden");
 });

@@ -3,12 +3,16 @@ package com.gyeongtaekim.ai_tutor.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gyeongtaekim.ai_tutor.domain.ChatSession;
+import com.gyeongtaekim.ai_tutor.domain.RagDocument;
 import com.gyeongtaekim.ai_tutor.domain.SessionQuiz;
+import com.gyeongtaekim.ai_tutor.domain.User;
 import com.gyeongtaekim.ai_tutor.dto.SessionQuizItemRequest;
 import com.gyeongtaekim.ai_tutor.dto.SessionQuizResponse;
 import com.gyeongtaekim.ai_tutor.dto.SessionQuizSaveRequest;
 import com.gyeongtaekim.ai_tutor.dto.SessionQuizSubmitRequest;
 import com.gyeongtaekim.ai_tutor.repository.ChatSessionRepository;
+import com.gyeongtaekim.ai_tutor.repository.ChatSessionDocumentRepository;
+import com.gyeongtaekim.ai_tutor.repository.RagDocumentRepository;
 import com.gyeongtaekim.ai_tutor.repository.SessionQuizRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -19,9 +23,13 @@ import org.springframework.web.server.ResponseStatusException;
 import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -30,9 +38,15 @@ public class SessionQuizService {
     private final ObjectMapper objectMapper;
     private final SessionQuizRepository sessionQuizRepository;
     private final ChatSessionRepository chatSessionRepository;
+    private final ChatSessionDocumentRepository chatSessionDocumentRepository;
+    private final RagDocumentRepository ragDocumentRepository;
 
     public List<SessionQuizResponse> getQuizzes(Long sessionId) {
-        findSession(sessionId);
+        return getQuizzes(sessionId, null);
+    }
+
+    public List<SessionQuizResponse> getQuizzes(Long sessionId, User currentUser) {
+        findSession(sessionId, currentUser);
         return sessionQuizRepository.findBySessionIdOrderByCreatedAtAscQuestionOrderAsc(sessionId).stream()
                 .map(SessionQuizResponse::new)
                 .toList();
@@ -40,6 +54,11 @@ public class SessionQuizService {
 
     @Transactional
     public List<SessionQuizResponse> saveQuizzes(Long sessionId, SessionQuizSaveRequest request) {
+        return saveQuizzes(sessionId, request, null);
+    }
+
+    @Transactional
+    public List<SessionQuizResponse> saveQuizzes(Long sessionId, SessionQuizSaveRequest request, User currentUser) {
         if (request.getDocumentId() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "documentId is required");
         }
@@ -48,7 +67,8 @@ public class SessionQuizService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "questions are required");
         }
 
-        ChatSession session = findSession(sessionId);
+        ChatSession session = findSession(sessionId, currentUser);
+        validateSourceDocuments(session, sourceDocumentIds, currentUser);
         String quizSetId = UUID.randomUUID().toString();
         String quizSetTitle = request.getQuizSetTitle() == null || request.getQuizSetTitle().isBlank()
                 ? "Quiz Set " + quizSetId.substring(0, 8)
@@ -65,11 +85,16 @@ public class SessionQuizService {
 
     @Transactional
     public List<SessionQuizResponse> renameQuizSet(Long sessionId, String quizSetId, String quizSetTitle) {
+        return renameQuizSet(sessionId, quizSetId, quizSetTitle, null);
+    }
+
+    @Transactional
+    public List<SessionQuizResponse> renameQuizSet(Long sessionId, String quizSetId, String quizSetTitle, User currentUser) {
         if (quizSetTitle == null || quizSetTitle.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "quizSetTitle is required");
         }
 
-        findSession(sessionId);
+        findSession(sessionId, currentUser);
         List<SessionQuiz> quizzes = sessionQuizRepository.findBySessionIdAndQuizSetIdOrderByCreatedAtAscQuestionOrderAsc(sessionId, quizSetId);
         if (quizzes.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Quiz set not found");
@@ -84,7 +109,12 @@ public class SessionQuizService {
 
     @Transactional
     public void deleteQuizSet(Long sessionId, String quizSetId) {
-        findSession(sessionId);
+        deleteQuizSet(sessionId, quizSetId, null);
+    }
+
+    @Transactional
+    public void deleteQuizSet(Long sessionId, String quizSetId, User currentUser) {
+        findSession(sessionId, currentUser);
         List<SessionQuiz> quizzes = sessionQuizRepository.findBySessionIdAndQuizSetIdOrderByCreatedAtAscQuestionOrderAsc(sessionId, quizSetId);
         if (quizzes.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Quiz set not found");
@@ -94,10 +124,16 @@ public class SessionQuizService {
 
     @Transactional
     public SessionQuizResponse submitQuiz(Long sessionId, Long quizId, SessionQuizSubmitRequest request) {
+        return submitQuiz(sessionId, quizId, request, null);
+    }
+
+    @Transactional
+    public SessionQuizResponse submitQuiz(Long sessionId, Long quizId, SessionQuizSubmitRequest request, User currentUser) {
         if (request.getSubmittedAnswer() == null || request.getSubmittedAnswer().trim().isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "submittedAnswer is required");
         }
 
+        findSession(sessionId, currentUser);
         SessionQuiz quiz = sessionQuizRepository.findByIdAndSessionId(quizId, sessionId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Quiz not found"));
 
@@ -110,6 +146,12 @@ public class SessionQuizService {
 
     @Transactional
     public SessionQuizResponse resetQuiz(Long sessionId, Long quizId) {
+        return resetQuiz(sessionId, quizId, null);
+    }
+
+    @Transactional
+    public SessionQuizResponse resetQuiz(Long sessionId, Long quizId, User currentUser) {
+        findSession(sessionId, currentUser);
         SessionQuiz quiz = sessionQuizRepository.findByIdAndSessionId(quizId, sessionId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Quiz not found"));
         quiz.resetProgress();
@@ -118,7 +160,12 @@ public class SessionQuizService {
 
     @Transactional
     public List<SessionQuizResponse> resetQuizSet(Long sessionId, String quizSetId) {
-        findSession(sessionId);
+        return resetQuizSet(sessionId, quizSetId, null);
+    }
+
+    @Transactional
+    public List<SessionQuizResponse> resetQuizSet(Long sessionId, String quizSetId, User currentUser) {
+        findSession(sessionId, currentUser);
         List<SessionQuiz> quizzes = sessionQuizRepository.findBySessionIdAndQuizSetIdOrderByCreatedAtAscQuestionOrderAsc(sessionId, quizSetId);
         if (quizzes.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Quiz set not found");
@@ -132,6 +179,44 @@ public class SessionQuizService {
     private ChatSession findSession(Long sessionId) {
         return chatSessionRepository.findById(sessionId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Chat session not found"));
+    }
+
+    private ChatSession findSession(Long sessionId, User currentUser) {
+        ChatSession session = findSession(sessionId);
+        if (currentUser != null && !currentUser.getId().equals(session.getUser().getId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Chat session does not belong to authenticated user");
+        }
+        return session;
+    }
+
+    private void validateSourceDocuments(ChatSession session, List<Long> sourceDocumentIds, User currentUser) {
+        if (currentUser == null) {
+            return;
+        }
+
+        Set<Long> requestedIds = sourceDocumentIds.stream()
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Map<Long, RagDocument> documentsById = ragDocumentRepository.findAllById(requestedIds).stream()
+                .collect(Collectors.toMap(RagDocument::getId, document -> document));
+
+        boolean hasUnavailableDocument = requestedIds.stream()
+                .anyMatch(documentId -> {
+                    RagDocument document = documentsById.get(documentId);
+                    return document == null
+                            || document.getUser() == null
+                            || !currentUser.getId().equals(document.getUser().getId());
+                });
+        if (hasUnavailableDocument) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Document not found");
+        }
+
+        Set<Long> attachedDocumentIds = chatSessionDocumentRepository.findBySessionIdOrderByIdAsc(session.getId()).stream()
+                .map(sessionDocument -> sessionDocument.getDocumentId())
+                .collect(Collectors.toSet());
+        if (!attachedDocumentIds.containsAll(requestedIds)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Selected document is not attached to this chat session");
+        }
     }
 
     private SessionQuiz toEntity(

@@ -2,21 +2,30 @@ package com.gyeongtaekim.ai_tutor.service;
 
 import com.gyeongtaekim.ai_tutor.domain.ChatMessage;
 import com.gyeongtaekim.ai_tutor.domain.ChatSession;
+import com.gyeongtaekim.ai_tutor.domain.ChatSessionDocument;
 import com.gyeongtaekim.ai_tutor.domain.LearningMemory;
+import com.gyeongtaekim.ai_tutor.domain.RagDocument;
+import com.gyeongtaekim.ai_tutor.domain.User;
 import com.gyeongtaekim.ai_tutor.dto.RagQueryResponse;
 import com.gyeongtaekim.ai_tutor.dto.TutorAskRequest;
 import com.gyeongtaekim.ai_tutor.dto.TutorAskResponse;
 import com.gyeongtaekim.ai_tutor.repository.ChatMessageRepository;
+import com.gyeongtaekim.ai_tutor.repository.ChatSessionDocumentRepository;
 import com.gyeongtaekim.ai_tutor.repository.ChatSessionRepository;
 import com.gyeongtaekim.ai_tutor.repository.LearningMemoryRepository;
+import com.gyeongtaekim.ai_tutor.repository.RagDocumentRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 @Service
@@ -28,13 +37,22 @@ public class TutorService {
 
     private final ChatSessionRepository chatSessionRepository;
     private final ChatMessageRepository chatMessageRepository;
+    private final ChatSessionDocumentRepository chatSessionDocumentRepository;
     private final LearningMemoryRepository learningMemoryRepository;
+    private final RagDocumentRepository ragDocumentRepository;
     private final RagService ragService;
     private final OllamaService ollamaService;
 
     public TutorAskResponse ask(Long sessionId, TutorAskRequest request) {
+        return ask(sessionId, request, null);
+    }
+
+    public TutorAskResponse ask(Long sessionId, TutorAskRequest request, User currentUser) {
         ChatSession session = chatSessionRepository.findById(sessionId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Chat session not found"));
+        if (currentUser != null && !currentUser.getId().equals(session.getUser().getId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Chat session does not belong to authenticated user");
+        }
 
         String question = request.getQuestion() == null ? "" : request.getQuestion().trim();
         System.out.println("튜터 질문 확인 = " + question);
@@ -61,22 +79,26 @@ public class TutorService {
 
         LearningMemory memory = learningMemoryRepository.findByUserId(session.getUser().getId()).orElse(null);
         List<ChatMessage> recentMessages = chatMessageRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
+        List<Long> resolvedDocumentIds = resolveDocumentIds(session, request);
+        List<RagDocument> selectedDocuments = findSelectedDocuments(currentUser, resolvedDocumentIds);
         String groundedQuestion = rewriteQuestionWithContext(question, recentMessages);
         String answerQuestion = question;
         boolean studyCourseMode = false;
 
         if ("!학습코스".equals(question)) {
-            groundedQuestion = buildStudyCourseQuestion();
+            groundedQuestion = buildStudyCourseRetrievalQuery(selectedDocuments);
+            answerQuestion = buildStudyCourseQuestion(selectedDocuments);
             answerQuestion = groundedQuestion;
             studyCourseMode = true;
         }
 
         RagQueryResponse ragResponse = ragService.query(
+                currentUser,
                 groundedQuestion,
-                resolveDocumentIds(request)
+                resolvedDocumentIds
         );
 
-        String answer = buildGroundedAnswer(answerQuestion, ragResponse, memory, recentMessages, studyCourseMode);
+        String answer = buildGroundedAnswer(answerQuestion, ragResponse, memory, recentMessages, studyCourseMode, selectedDocuments);
         String sourceReferences = ragResponse.getSources().isEmpty()
                 ? null
                 : String.join(" | ", ragResponse.getSources());
@@ -153,6 +175,17 @@ public class TutorService {
         return fallbackAnswer;
     }
 
+    private String buildGroundedAnswer(
+            String question,
+            RagQueryResponse ragResponse,
+            LearningMemory memory,
+            List<ChatMessage> recentMessages,
+            boolean studyCourseMode,
+            List<RagDocument> selectedDocuments
+    ) {
+        return buildGroundedAnswer(question, ragResponse, memory, recentMessages, studyCourseMode);
+    }
+
     private String buildFallbackAnswer(RagQueryResponse ragResponse) {
         String conciseAnswer = ragResponse.getAnswer() == null ? "" : ragResponse.getAnswer().trim();
         conciseAnswer = trimToSentenceLimit(conciseAnswer, 8);
@@ -164,10 +197,17 @@ public class TutorService {
         List<String> sources = ragResponse.getSources();
 
         String selectedDocuments = sources.stream()
-                .map(source -> source.replaceAll("\\s*\\[chunk\\s+\\d+\\]", ""))
+                .map(this::stripChunkSourceDetails)
                 .distinct()
                 .map(title -> "- " + title)
                 .collect(java.util.stream.Collectors.joining("\n"));
+        List<String> concepts = extractStudyCourseConcepts(evidence);
+        String conceptBlock = concepts.isEmpty()
+                ? "- 선택된 PDF에서 확인된 핵심 개념"
+                : concepts.stream()
+                        .limit(10)
+                        .map(concept -> "- " + concept)
+                        .collect(java.util.stream.Collectors.joining("\n"));
 
         return """
                 AI가 생성한 통합 학습 코스
@@ -181,28 +221,113 @@ public class TutorService {
                 3. 문서에 나온 개념을 학습 문제나 설명 상황에 적용할 수 있다.
 
                 핵심 개념
-                - 운영체제
-                - 시스템 소프트웨어
-                - 하드웨어 자원 관리
-                - 응용 프로그램
-                - CPU 스케줄링
-                - 프로세스
-                - FCFS
-                - Round Robin
+                %s
 
                 문서별 핵심 요약
                 %s
 
                 추천 학습 순서
-                1단계: 선택된 문서에서 반복적으로 등장하는 핵심 용어를 먼저 확인한다.
-                2단계: 운영체제가 하드웨어와 응용 프로그램 사이에서 어떤 역할을 하는지 정리한다.
-                3단계: CPU 스케줄링이 왜 필요한지 이해한다.
-                4단계: FCFS와 Round Robin 같은 대표 스케줄링 방식을 비교한다.
-                5단계: 핵심 개념을 직접 말로 설명하며 복습한다.
+                %s
                 """.formatted(
                 selectedDocuments.isBlank() ? "- 선택된 PDF" : selectedDocuments,
-                evidence.isBlank() ? "- 선택된 PDF에서 확인된 내용을 바탕으로 학습합니다." : summarizeEvidenceBySource(sources, evidence)
+                conceptBlock,
+                evidence.isBlank() ? "- 선택된 PDF에서 확인된 내용을 바탕으로 학습합니다." : summarizeEvidenceBySource(sources, evidence),
+                buildStudyCourseSteps(concepts)
         );
+    }
+
+    private List<String> extractStudyCourseConcepts(String evidence) {
+        if (evidence == null || evidence.isBlank()) {
+            return List.of();
+        }
+
+        LinkedHashSet<String> concepts = new LinkedHashSet<>();
+        for (String rawLine : evidence.split("\\R|(?<=[.!?])\\s+")) {
+            String cleaned = cleanStudyCourseConcept(rawLine);
+            if (cleaned.isBlank()) {
+                continue;
+            }
+
+            int colonIndex = cleaned.indexOf(':');
+            if (colonIndex > 1 && colonIndex <= 50) {
+                String concept = cleanStudyCourseConcept(cleaned.substring(0, colonIndex));
+                if (isUsefulStudyCourseConcept(concept)) {
+                    concepts.add(concept);
+                }
+                continue;
+            }
+
+            if (cleaned.length() > 90) {
+                cleaned = cleaned.substring(0, 90).trim();
+            }
+            if (isUsefulStudyCourseConcept(cleaned)) {
+                concepts.add(cleaned);
+            }
+        }
+
+        return concepts.stream().limit(10).toList();
+    }
+
+    private String buildStudyCourseSteps(List<String> concepts) {
+        List<String> selectedConcepts = concepts == null || concepts.isEmpty()
+                ? List.of("핵심 개념")
+                : concepts.stream().limit(5).toList();
+
+        List<String> steps = new ArrayList<>();
+        steps.add("1단계: 선택한 PDF의 제목과 요약을 보고 전체 주제를 파악합니다.");
+        steps.add("2단계: " + selectedConcepts.get(0) + "의 정의와 역할을 문서 근거로 정리합니다.");
+        if (selectedConcepts.size() >= 2) {
+            steps.add("3단계: " + selectedConcepts.get(0) + "와 " + selectedConcepts.get(1) + "의 관계를 비교합니다.");
+        } else {
+            steps.add("3단계: 핵심 개념이 어떤 상황에서 쓰이는지 예시와 함께 정리합니다.");
+        }
+        if (selectedConcepts.size() >= 3) {
+            steps.add("4단계: " + selectedConcepts.get(2) + "까지 연결해 전체 흐름을 설명합니다.");
+        } else {
+            steps.add("4단계: 문서의 문장을 자기 말로 다시 설명하며 이해도를 확인합니다.");
+        }
+        steps.add("5단계: 선택한 PDF 근거만 사용해 예상 질문과 답안을 만들어 복습합니다.");
+
+        return String.join("\n", steps);
+    }
+
+    private boolean isUsefulStudyCourseConcept(String concept) {
+        if (concept == null || concept.isBlank()) {
+            return false;
+        }
+        String normalized = concept.trim();
+        if (normalized.length() < 2) {
+            return false;
+        }
+        String lower = normalized.toLowerCase(Locale.ROOT);
+        return !Set.of(
+                "pdf",
+                "text",
+                "source",
+                "chunk",
+                "selected pdf",
+                "선택된 pdf",
+                "선택된 pdf에서 확인된 핵심 개념"
+        ).contains(lower)
+                && !lower.matches("^[0-9.()\\s-]+$");
+    }
+
+    private String cleanStudyCourseConcept(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value
+                .replaceAll("\\s*\\[chunk\\s+\\d+[^\\]]*\\]", "")
+                .replaceAll("^[\\s\\-*:0-9.)]+", "")
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
+
+    private String stripChunkSourceDetails(String source) {
+        if (source == null) {
+            return "";
+        }
+        return source.replaceAll("\\s*\\[chunk\\s+\\d+[^\\]]*\\]", "").trim();
     }
 
     private String summarizeEvidenceBySource(List<String> sources, String evidence) {
@@ -211,7 +336,7 @@ public class TutorService {
         }
 
         return sources.stream()
-                .map(source -> source.replaceAll("\\s*\\[chunk\\s+\\d+\\]", ""))
+                .map(this::stripChunkSourceDetails)
                 .distinct()
                 .map(title -> "- " + title + ": " + evidence.replaceAll("\\s+", " "))
                 .collect(java.util.stream.Collectors.joining("\n"));
@@ -417,9 +542,35 @@ public class TutorService {
         return candidates.get(candidates.size() - 1);
     }
 
-    private List<Long> resolveDocumentIds(TutorAskRequest request) {
+    private List<Long> resolveDocumentIds(ChatSession session, TutorAskRequest request) {
+        List<Long> sessionDocumentIds = chatSessionDocumentRepository.findBySessionIdOrderByIdAsc(session.getId()).stream()
+                .map(ChatSessionDocument::getDocumentId)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .toList();
+
+        List<Long> requestedDocumentIds = resolveRequestedDocumentIds(request);
+        if (requestedDocumentIds.isEmpty()) {
+            return sessionDocumentIds;
+        }
+
+        Set<Long> attachedDocumentIds = new LinkedHashSet<>(sessionDocumentIds);
+        List<Long> detachedDocumentIds = requestedDocumentIds.stream()
+                .filter(documentId -> !attachedDocumentIds.contains(documentId))
+                .toList();
+        if (!detachedDocumentIds.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Selected document is not attached to this chat session");
+        }
+
+        return requestedDocumentIds;
+    }
+
+    private List<Long> resolveRequestedDocumentIds(TutorAskRequest request) {
         if (request.getDocumentIds() != null && !request.getDocumentIds().isEmpty()) {
-            return request.getDocumentIds();
+            return request.getDocumentIds().stream()
+                    .filter(java.util.Objects::nonNull)
+                    .distinct()
+                    .toList();
         }
 
         if (request.getDocumentId() != null) {
@@ -427,6 +578,32 @@ public class TutorService {
         }
 
         return List.of();
+    }
+
+    private List<RagDocument> findSelectedDocuments(User currentUser, List<Long> documentIds) {
+        if (documentIds == null || documentIds.isEmpty()) {
+            return List.of();
+        }
+
+        return documentIds.stream()
+                .map(documentId -> currentUser == null
+                        ? ragDocumentRepository.findById(documentId)
+                        : ragDocumentRepository.findByIdAndUserId(documentId, currentUser.getId()))
+                .flatMap(java.util.Optional::stream)
+                .toList();
+    }
+
+    private String buildStudyCourseRetrievalQuery(List<RagDocument> selectedDocuments) {
+        String documentContext = selectedDocuments == null || selectedDocuments.isEmpty()
+                ? "선택된 PDF"
+                : selectedDocuments.stream()
+                        .map(document -> document.getTitle() + " " + document.getSubject() + " " + document.getUnitName())
+                        .collect(java.util.stream.Collectors.joining(" "));
+        return documentContext + " 핵심 개념 학습 목표 복습 순서 요약";
+    }
+
+    private String buildStudyCourseQuestion(List<RagDocument> selectedDocuments) {
+        return buildStudyCourseQuestion();
     }
 
     private String buildStudyCourseQuestion() {

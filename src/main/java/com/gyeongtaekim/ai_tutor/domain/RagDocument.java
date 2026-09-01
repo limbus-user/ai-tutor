@@ -4,9 +4,12 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
@@ -20,6 +23,10 @@ public class RagDocument {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id")
+    private User user;
 
     @Column(nullable = false)
     private String title;
@@ -47,6 +54,7 @@ public class RagDocument {
     private LocalDateTime createdAt;
 
     public RagDocument(
+            User user,
             String title,
             SourceType sourceType,
             String trustLevel,
@@ -55,6 +63,7 @@ public class RagDocument {
             String storedFileName,
             String extractedText
     ) {
+        this.user = user;
         this.title = title;
         this.sourceType = sourceType;
         this.trustLevel = trustLevel;
@@ -63,6 +72,22 @@ public class RagDocument {
         this.storedFileName = storedFileName;
         this.extractedText = extractedText;
         this.createdAt = LocalDateTime.now();
+    }
+
+    public RagDocument(
+            String title,
+            SourceType sourceType,
+            String trustLevel,
+            String subject,
+            String unitName,
+            String storedFileName,
+            String extractedText
+    ) {
+        this(null, title, sourceType, trustLevel, subject, unitName, storedFileName, extractedText);
+    }
+
+    public void assignUser(User user) {
+        this.user = user;
     }
 
     public void updateTitle(String title) {

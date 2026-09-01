@@ -58,10 +58,16 @@ public class ProblemService {
     }
 
     public ProblemSubmissionResponse submitAnswer(Long problemId, ProblemSubmissionRequest request) {
+        return submitAnswer(problemId, request, null);
+    }
+
+    public ProblemSubmissionResponse submitAnswer(Long problemId, ProblemSubmissionRequest request, User currentUser) {
         Problem problem = problemRepository.findById(problemId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Problem not found"));
-        User user = userRepository.findById(request.getUserId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+        User user = currentUser != null
+                ? currentUser
+                : userRepository.findById(request.getUserId())
+                        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
 
         boolean correct = isCorrectAnswer(problem, request.getSubmittedAnswer());
 
