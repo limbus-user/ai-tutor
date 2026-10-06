@@ -142,6 +142,29 @@ function applyAuthResponse(data) {
   saveAuth();
 }
 
+function applyOAuth2RedirectAuth() {
+  const hash = window.location.hash || "";
+  const prefix = "#oauth2=";
+  if (!hash.startsWith(prefix)) {
+    return false;
+  }
+
+  try {
+    const payload = decodeURIComponent(hash.slice(prefix.length));
+    applyAuthResponse(JSON.parse(payload));
+    history.replaceState(null, document.title, window.location.pathname + window.location.search);
+    return true;
+  } catch {
+    history.replaceState(null, document.title, window.location.pathname + window.location.search);
+    showAuthFeedback("소셜 로그인 응답을 처리하지 못했습니다.", true);
+    return false;
+  }
+}
+
+function startOAuth2Login(provider) {
+  window.location.href = `/oauth2/authorization/${provider}`;
+}
+
 function appendApiLog(log) {
   state.apiLogs.unshift(log);
   state.apiLogs = state.apiLogs.slice(0, 50);
@@ -3760,6 +3783,7 @@ function logoutToAuth() {
 
 async function initializeApp() {
   loadAuth();
+  applyOAuth2RedirectAuth();
   renderDevModeLogs();
   await pingServer();
 
@@ -3856,6 +3880,8 @@ setupPdfDropzone("workspace-pdf-dropzone", "workspace-file", "workspace-pdf-file
 
 document.getElementById("login-form").addEventListener("submit", (event) => void onLogin(event));
 document.getElementById("signup-form").addEventListener("submit", (event) => void onSignup(event));
+document.getElementById("google-login-button")?.addEventListener("click", () => startOAuth2Login("google"));
+document.getElementById("kakao-login-button")?.addEventListener("click", () => startOAuth2Login("kakao"));
 document.getElementById("feedback-form").addEventListener("submit", (event) => void onFeedbackSubmit(event));
 document.getElementById("show-signup-button").addEventListener("click", showSignupForm);
 document.getElementById("hide-signup-button").addEventListener("click", hideSignupForm);

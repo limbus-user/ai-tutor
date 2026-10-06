@@ -3,6 +3,7 @@ package com.gyeongtaekim.ai_tutor.config;
 import com.gyeongtaekim.ai_tutor.security.CustomUserDetailsService;
 import com.gyeongtaekim.ai_tutor.security.JwtAuthenticationFilter;
 import com.gyeongtaekim.ai_tutor.security.JwtTokenProvider;
+import com.gyeongtaekim.ai_tutor.security.OAuth2AuthenticationSuccessHandler;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -12,8 +13,6 @@ import org.springframework.security.config.annotation.authentication.configurati
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
@@ -24,11 +23,7 @@ public class SecurityConfig {
 
     private final JwtTokenProvider jwtTokenProvider;
     private final CustomUserDetailsService customUserDetailsService;
-
-    @Bean
-    public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
-    }
+    private final OAuth2AuthenticationSuccessHandler oauth2AuthenticationSuccessHandler;
 
     @Bean
     public AuthenticationManager authenticationManager(
@@ -42,7 +37,7 @@ public class SecurityConfig {
                 .cors(cors -> cors.disable())
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session ->
-                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                        session.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
                                 "/",
@@ -56,7 +51,11 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/exam-mocks/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/feedback").permitAll()
                         .requestMatchers("/api/auth/**").permitAll()
+                        .requestMatchers("/oauth2/**", "/login/oauth2/**").permitAll()
                         .anyRequest().authenticated()
+                )
+                .oauth2Login(oauth2 -> oauth2
+                        .successHandler(oauth2AuthenticationSuccessHandler)
                 )
                 .addFilterBefore(
                         new JwtAuthenticationFilter(jwtTokenProvider, customUserDetailsService),
